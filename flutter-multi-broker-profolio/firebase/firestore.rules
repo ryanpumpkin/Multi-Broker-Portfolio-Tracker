@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// Firestore security rules for Multi-Broker Portfolio Tracker.
+//
+// Authorization model:
+//   * Every per-user document lives under /users/{uid}/... and is readable
+//     and writable ONLY by the authenticated user with matching uid.
+//   * /fx_rates/* is a shared cache: any authenticated user may read it,
+//     but only the backend service account (identified by a custom claim
+//     `service_account == true`) may write. The backend uses the Firebase
+//     Admin SDK which bypasses these rules entirely, so the write rule
+//     here is a defence-in-depth measure for client SDKs that happen to
+//     hold an admin-minted token.
+//   * Everything else is denied by default.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isServiceAccount() {
+      return isSignedIn()
+        && request.auth.token.service_account == true;
+    }
+
+    // Per-user tree: only the owning user may read/write.
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /{document=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // Shared FX rate cache: authed read, service-account-only write.
+    match /fx_rates/{pair} {
+      allow read:  if isSignedIn();
+      allow write: if isServiceAccount();
+    }
+
+    // Default deny: any path not matched above is implicitly denied.
+  }
+}

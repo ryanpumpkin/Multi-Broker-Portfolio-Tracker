@@ -1,0 +1,37 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "alerts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "scope",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "alerts",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "scope",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "alert_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "alert_id", "order": "ASCENDING" },
+        { "fieldPath": "fired_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "alert_events",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "alert_id", "order": "ASCENDING" },
+        { "fieldPath": "fired_at", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
