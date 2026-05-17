@@ -14,7 +14,7 @@ Each module has its own task file under `doc/tasks/`. Tick a module here once **
 
 ## Backend Proxy
 
-- [ ] [backend-bootstrap](./backend-bootstrap.md) — FastAPI scaffold, auth middleware, ops endpoints
+- [x] [backend-bootstrap](./backend-bootstrap.md) — FastAPI scaffold, auth middleware, ops endpoints
 - [ ] [backend-adapters](./backend-adapters.md) — LongBridge, IBKR, Futu, Binance adapters
 - [ ] [backend-aggregator-and-fx](./backend-aggregator-and-fx.md) — aggregation + FX service
 - [ ] [backend-vault](./backend-vault.md) — credential vault (E2E + KMS)
