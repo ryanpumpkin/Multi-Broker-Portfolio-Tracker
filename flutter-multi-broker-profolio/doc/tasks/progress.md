@@ -4,7 +4,7 @@ Each module has its own task file under `doc/tasks/`. Tick a module here once **
 
 ## Flutter Client
 
-- [ ] [flutter-bootstrap](./flutter-bootstrap.md) — project scaffold, router, theme, i18n, logging
+- [~] [flutter-bootstrap](./flutter-bootstrap.md) — project scaffold, router, theme, i18n, logging landed (28 tests passing, lint clean, ~97% coverage on hand-written code); live-device boot smoke deferred until `firebase_options.dart` lands via firebase-setup
 - [ ] [flutter-domain](./flutter-domain.md) — entities, repo interfaces, use cases
 - [ ] [flutter-data](./flutter-data.md) — Drift, secure storage, E2E crypto, remote clients, repos
 - [ ] [flutter-state](./flutter-state.md) — Riverpod providers
