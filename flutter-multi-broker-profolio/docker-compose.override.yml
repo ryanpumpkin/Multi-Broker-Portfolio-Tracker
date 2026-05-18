@@ -1,0 +1,85 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.override.yml — local development overrides
+#
+# Applied automatically by `docker compose up` on top of docker-compose.yml.
+# Do NOT commit secrets here.
+#
+# Key changes vs. production:
+#   • backend source tree mounted for hot-reload with --reload.
+#   • Broker adapter env vars set to "disabled" so IBKR/Futu sidecars are
+#     optional (they still start but the adapters skip real connections).
+#   • Auth disabled so you can hit the API without a Firebase ID token.
+#   • Firebase emulator endpoint wired in.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runtime
+    # Mount source for hot-reload (overrides the baked-in copy).
+    volumes:
+      - ./backend/app:/app/app:ro
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --reload
+    environment:
+      MBP_ENV: development
+      MBP_LOG_LEVEL: DEBUG
+      MBP_AUTH_DISABLED: "true"
+      # Skip real broker connections in dev — set adapters to disabled mode.
+      IBKR_ADAPTER: disabled
+      FUTU_ADAPTER: disabled
+      # Point Firebase SDKs at the local emulator suite.
+      FIREBASE_AUTH_EMULATOR_HOST: firebase-emulator:9099
+      FIRESTORE_EMULATOR_HOST: firebase-emulator:8080
+      FIREBASE_STORAGE_EMULATOR_HOST: firebase-emulator:9199
+    ports:
+      - "8000:8000"
+
+  # Sidecars still start so the compose graph is valid, but credentials are
+  # blank — they will fail to connect to real IBKR/Futu endpoints, which is
+  # intentional for local dev.
+  ibkr-gateway:
+    environment:
+      IBKR_USERNAME: "dev-placeholder"
+      IBKR_PASSWORD: "dev-placeholder"
+      IBKR_TRADING_MODE: paper
+
+  futu-opend:
+    environment:
+      FUTU_OPEND_LOGIN_ACCOUNT: "dev-placeholder"
+      FUTU_OPEND_LOGIN_PASSWORD_MD5: "dev-placeholder"
+
+  # ── Firebase Local Emulator Suite ───────────────────────────────────────────
+  firebase-emulator:
+    image: andreysenov/firebase-tools:latest
+    restart: unless-stopped
+    working_dir: /firebase
+    volumes:
+      - ./firebase:/firebase:ro
+    # Start Auth, Firestore, and Storage emulators; export data on shutdown so
+    # state survives restarts.
+    command:
+      - firebase
+      - emulators:start
+      - --only
+      - auth,firestore,storage
+      - --project
+      - demo-mbp-local
+      - --export-on-exit=/firebase/emulator-data
+      - --import=/firebase/emulator-data
+    ports:
+      - "4000:4000"   # Emulator Hub UI
+      - "9099:9099"   # Auth emulator
+      - "8080:8080"   # Firestore emulator
+      - "9199:9199"   # Storage emulator
+    networks:
+      - mbp-net

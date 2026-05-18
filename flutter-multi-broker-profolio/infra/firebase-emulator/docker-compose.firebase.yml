@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# infra/firebase-emulator/docker-compose.firebase.yml
+#
+# Standalone Firebase Local Emulator Suite snippet.
+#
+# Usage (CI / standalone, without the full compose stack):
+#
+#   docker compose -f infra/firebase-emulator/docker-compose.firebase.yml up -d
+#
+# Or include it alongside the main stack:
+#
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f infra/firebase-emulator/docker-compose.firebase.yml \
+#     up -d
+#
+# The backend reads the FIREBASE_*_EMULATOR_HOST variables (set here) to
+# redirect all Firebase SDK calls to the local emulators instead of the
+# live Firebase project.
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  mbp-net:
+    external: true   # attach to the same network as the backend
+
+services:
+  firebase-emulator:
+    image: andreysenov/firebase-tools:latest
+    restart: unless-stopped
+    working_dir: /firebase
+    volumes:
+      # Mount the firebase/ directory at the repo root (adjust path if
+      # running from a directory other than the repo root).
+      - ../../firebase:/firebase:ro
+    command:
+      - firebase
+      - emulators:start
+      - --only
+      - auth,firestore,storage
+      - --project
+      - demo-mbp-local
+      - --export-on-exit=/firebase/emulator-data
+      - --import=/firebase/emulator-data
+    environment:
+      # Tell Firebase SDKs where the emulators are listening.
+      FIREBASE_AUTH_EMULATOR_HOST: "localhost:9099"
+      FIRESTORE_EMULATOR_HOST: "localhost:8080"
+      FIREBASE_STORAGE_EMULATOR_HOST: "localhost:9199"
+    ports:
+      - "4000:4000"   # Emulator Hub / UI
+      - "9099:9099"   # Authentication emulator
+      - "8080:8080"   # Firestore emulator
+      - "9199:9199"   # Storage emulator
+    networks:
+      - mbp-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5

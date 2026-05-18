@@ -23,7 +23,7 @@ Each module has its own task file under `doc/tasks/`. Tick a module here once **
 ## Platform / Infra
 
 - [~] [firebase-setup](./firebase-setup.md) — rules, indexes, schema, and emulator tests landed (10/10 passing); client SDK config files (plist/json/`firebase_options.dart`) deferred to developer via `flutterfire configure` — see `firebase/CLIENT_CONFIG.md`
-- [ ] [infra-deployment](./infra-deployment.md) — docker-compose with broker gateway sidecars
+- [x] [infra-deployment](./infra-deployment.md) — docker-compose with IBKR/Futu sidecars, Firebase emulator, smoke test (`docker compose config` validates; smoke test documented and executable)
 
 ---
 
