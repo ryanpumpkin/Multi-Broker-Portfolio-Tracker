@@ -253,7 +253,19 @@ class Mappers {
     );
   }
 
-  static double _num(dynamic v) => (v as num?)?.toDouble() ?? 0.0;
+  /// Coerce a JSON value into a double. The backend serialises monetary
+  /// fields as strings (e.g. `"0"`, `"123.45"`) to preserve Decimal
+  /// precision over the wire, while older Flutter fixtures use numeric
+  /// literals. Accept either.
+  static double _num(dynamic v) {
+    if (v == null) return 0.0;
+    if (v is num) return v.toDouble();
+    if (v is String) {
+      if (v.isEmpty) return 0.0;
+      return double.tryParse(v) ?? 0.0;
+    }
+    return 0.0;
+  }
 
   static String? _stringOrNull(dynamic value) {
     if (value is String && value.trim().isNotEmpty) {
