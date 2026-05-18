@@ -1,0 +1,43 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../domain/domain.dart';
+
+Never _missing(String name) => throw UnimplementedError(
+      '$name is not bound. Override this provider in ProviderScope.',
+    );
+
+final authRepositoryProvider = Provider<AuthRepository>(
+  (ref) => _missing('authRepositoryProvider'),
+);
+
+final settingsRepositoryProvider = Provider<SettingsRepository>(
+  (ref) => _missing('settingsRepositoryProvider'),
+);
+
+final connectionsRepositoryProvider = Provider<ConnectionsRepository>(
+  (ref) => _missing('connectionsRepositoryProvider'),
+);
+
+final portfolioRepositoryProvider = Provider<PortfolioRepository>(
+  (ref) => _missing('portfolioRepositoryProvider'),
+);
+
+final quotesRepositoryProvider = Provider<QuotesRepository>(
+  (ref) => _missing('quotesRepositoryProvider'),
+);
+
+final transactionsRepositoryProvider = Provider<TransactionsRepository>(
+  (ref) => _missing('transactionsRepositoryProvider'),
+);
+
+final alertsRepositoryProvider = Provider<AlertsRepository>(
+  (ref) => _missing('alertsRepositoryProvider'),
+);
+
+final manualHoldingsRepositoryProvider = Provider<ManualHoldingsRepository>(
+  (ref) => _missing('manualHoldingsRepositoryProvider'),
+);
+
+final fxRepositoryProvider = Provider<FxRepository>(
+  (ref) => _missing('fxRepositoryProvider'),
+);
