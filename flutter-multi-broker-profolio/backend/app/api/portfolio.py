@@ -1,0 +1,52 @@
+"""Portfolio aggregation endpoints."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
+
+from app.middleware.auth import AuthenticatedUser, current_user
+from app.models.domain import CashBalance, PartialResult, PortfolioSnapshot, Position, Transaction
+from app.services.aggregator import PortfolioAggregator
+from app.services.dependencies import get_portfolio_aggregator
+
+router = APIRouter(tags=["portfolio"])
+
+
+@router.get("/portfolio", response_model=PortfolioSnapshot)
+async def get_portfolio(
+    user: Annotated[AuthenticatedUser, Depends(current_user)],
+    aggregator: Annotated[PortfolioAggregator, Depends(get_portfolio_aggregator)],
+    base_currency: Annotated[str, Query(min_length=3, max_length=3)] = "USD",
+) -> PortfolioSnapshot:
+    return await aggregator.get_snapshot(user.user_id, base_currency=base_currency)
+
+
+@router.get("/positions", response_model=PartialResult[Position])
+async def get_positions(
+    user: Annotated[AuthenticatedUser, Depends(current_user)],
+    aggregator: Annotated[PortfolioAggregator, Depends(get_portfolio_aggregator)],
+    source: str | None = None,
+) -> PartialResult[Position]:
+    return await aggregator.get_positions(user.user_id, source=source)
+
+
+@router.get("/balances", response_model=PartialResult[CashBalance])
+async def get_balances(
+    user: Annotated[AuthenticatedUser, Depends(current_user)],
+    aggregator: Annotated[PortfolioAggregator, Depends(get_portfolio_aggregator)],
+    source: str | None = None,
+) -> PartialResult[CashBalance]:
+    return await aggregator.get_balances(user.user_id, source=source)
+
+
+@router.get("/transactions", response_model=PartialResult[Transaction])
+async def get_transactions(
+    user: Annotated[AuthenticatedUser, Depends(current_user)],
+    aggregator: Annotated[PortfolioAggregator, Depends(get_portfolio_aggregator)],
+    source: str | None = None,
+    since: str | None = None,
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
+) -> PartialResult[Transaction]:
+    return await aggregator.get_transactions(user.user_id, source=source, since=since, limit=limit)
