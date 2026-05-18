@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:multi_broker_portfolio/app_lock/app_lock.dart';
 import 'package:multi_broker_portfolio/data/crypto/e2e.dart';
 import 'package:multi_broker_portfolio/domain/domain.dart';
 import 'package:multi_broker_portfolio/state/app_lock_provider.dart';
