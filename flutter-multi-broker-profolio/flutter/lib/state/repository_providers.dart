@@ -1,5 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
+import '../data/local/secure_storage/secure_storage_adapter.dart';
+import '../data/local/secure_storage/secure_store.dart';
+import '../data/repositories/auth_repository_impl.dart';
+import '../data/repositories/firebase_auth_adapter.dart';
 import '../domain/domain.dart';
 
 Never _missing(String name) => throw UnimplementedError(
@@ -7,7 +12,17 @@ Never _missing(String name) => throw UnimplementedError(
     );
 
 final authRepositoryProvider = Provider<AuthRepository>(
-  (ref) => _missing('authRepositoryProvider'),
+  (ref) {
+    final secureStore = SecureStore(
+      FallbackKeyValueStore(primary: FlutterSecureStorageAdapter()),
+    );
+    return AuthRepositoryImpl(
+      FirebaseAuthAdapter(FirebaseAuth.instance),
+      sessionCleaner: CompositeAuthSessionCleaner([
+        SecureStoreAuthSessionCleaner(secureStore),
+      ]),
+    );
+  },
 );
 
 final settingsRepositoryProvider = Provider<SettingsRepository>(

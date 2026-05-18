@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:multi_broker_portfolio/app_lock/app_lock.dart';
 import 'package:multi_broker_portfolio/domain/domain.dart';
 import 'package:multi_broker_portfolio/logging/logger.dart';
 import 'package:multi_broker_portfolio/state/state.dart';
@@ -459,26 +460,41 @@ void main() {
   });
 
   group('appLockProvider', () {
-    test('tracks lock state and failed attempts', () {
-      final container = ProviderContainer();
+    test('tracks lock state and supports pin unlock + failure counting',
+        () async {
+      final store = InMemoryAppLockStore();
+      const hasher = Sha256PinHasher();
+      await store.writePinHash(await hasher.hash('1234'));
+      await store.writeSettings(
+        const AppLockSettings(
+          enabled: true,
+          biometricEnabled: false,
+          timeout: Duration(seconds: 30),
+        ),
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          appLockStoreProvider.overrideWithValue(store),
+          appLockBiometricAuthenticatorProvider
+              .overrideWithValue(_FakeBiometricAuthenticator()),
+        ],
+      );
       addTearDown(container.dispose);
 
+      await container.read(appLockProvider.future);
       final notifier = container.read(appLockProvider.notifier);
-      expect(container.read(appLockProvider).isLocked, isTrue);
+      expect(container.read(appLockProvider).value?.isLocked, isTrue);
 
-      notifier.unlock();
-      expect(container.read(appLockProvider).isLocked, isFalse);
+      final unlocked = await notifier.unlockWithPin('1234');
+      expect(unlocked, isTrue);
+      expect(container.read(appLockProvider).value?.isLocked, isFalse);
 
-      notifier.registerFailedAttempt();
-      notifier.registerFailedAttempt();
-      expect(container.read(appLockProvider).failedAttempts, 2);
-
-      notifier.resetAttempts();
-      expect(container.read(appLockProvider).failedAttempts, 0);
-      expect(container.read(appLockProvider).lastFailedAt, isNull);
-
-      notifier.lock();
-      expect(container.read(appLockProvider).isLocked, isTrue);
+      await notifier.lock();
+      await notifier.unlockWithPin('0000');
+      await notifier.unlockWithPin('0000');
+      expect(container.read(appLockProvider).value?.failedAttempts, 2);
+      expect(container.read(appLockProvider).value?.isLocked, isTrue);
     });
   });
 
@@ -538,12 +554,11 @@ void main() {
   });
 
   group('repository provider defaults', () {
-    test('throw UnimplementedError when not overridden', () {
+    test('throw UnimplementedError when not overridden (non-auth repos)', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
       final providers = <ProviderListenable<Object?>>[
-        authRepositoryProvider,
         settingsRepositoryProvider,
         connectionsRepositoryProvider,
         portfolioRepositoryProvider,
@@ -866,6 +881,14 @@ class _FakeFxRepository implements FxRepository {
   Future<void> dispose() async {
     await _ctrl.close();
   }
+}
+
+class _FakeBiometricAuthenticator implements BiometricAuthenticator {
+  @override
+  Future<bool> authenticate({required String reason}) async => false;
+
+  @override
+  Future<bool> isAvailable() async => true;
 }
 
 Connection _connection({
