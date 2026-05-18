@@ -152,6 +152,13 @@ class SettingsScreen extends ConsumerWidget {
                     subtitle: Text(user?.email ?? ''),
                     onTap: () async {
                       await ref.read(authProvider.notifier).signOut();
+                      // Signing out wipes the secure-storage PIN hash +
+                      // salt via the AuthSessionCleaner. Invalidate the
+                      // in-memory app-lock state and the credential key
+                      // so the next sign-in re-reads from the now-empty
+                      // storage and presents a fresh Set-PIN flow.
+                      ref.invalidate(appLockProvider);
+                      ref.read(credentialKeyProvider.notifier).clear();
                     },
                   );
                 },
