@@ -87,7 +87,17 @@ def _map_position(raw: Any) -> Position:
     last = _opt_dec(_lookup(raw, "last_price", "last_done", "price"))
     mv_raw = _lookup(raw, "market_value")
     upl_raw = _lookup(raw, "unrealized_pnl")
-    mv = _opt_dec(mv_raw) if mv_raw is not None else (last * qty if last is not None else None)
+    # market_value falls back through: explicit field → live-quote-based
+    # (last * qty) → cost-basis (avg * qty). The cost-basis fallback keeps
+    # the dashboard usable even when LongBridge returns null prices
+    # outside trading hours.
+    mv = (
+        _opt_dec(mv_raw)
+        if mv_raw is not None
+        else last * qty if last is not None
+        else avg * qty if avg is not None
+        else None
+    )
     upl = (
         _opt_dec(upl_raw)
         if upl_raw is not None

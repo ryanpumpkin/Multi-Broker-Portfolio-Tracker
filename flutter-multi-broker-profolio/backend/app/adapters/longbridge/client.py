@@ -62,6 +62,46 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
                 rows.append(channel)
                 continue
             rows.extend(list(positions))
+
+        # The trade-side `stock_positions` endpoint returns `last_price: null`
+        # for many positions. Fetch live quotes for the symbols and inject the
+        # price so the aggregator can compute market_value and unrealized_pnl.
+        symbols = [
+            str(getattr(p, "symbol", "")) for p in rows if getattr(p, "symbol", None)
+        ]
+        if symbols:
+            try:
+                quotes = await _to_thread(self._quote_ctx.quote, symbols)
+                price_by_symbol: dict[str, Any] = {}
+                for q in _to_iterable(quotes, attribute="secu_quote"):
+                    sym = getattr(q, "symbol", None) or (
+                        q.get("symbol") if isinstance(q, dict) else None
+                    )
+                    price = getattr(q, "last_done", None) or (
+                        q.get("last_done") if isinstance(q, dict) else None
+                    )
+                    if sym and price is not None:
+                        price_by_symbol[str(sym)] = price
+
+                # Patch each position with the live price under both
+                # `last_price` and `last_done` so downstream code that
+                # looks up either key picks it up. Skip silently if the
+                # position object is read-only (e.g. an SDK dataclass).
+                for p in rows:
+                    sym = str(getattr(p, "symbol", "") or "")
+                    if sym not in price_by_symbol:
+                        continue
+                    price = price_by_symbol[sym]
+                    for attr in ("last_price", "last_done"):
+                        try:
+                            setattr(p, attr, price)
+                        except (AttributeError, TypeError):
+                            pass
+            except Exception:  # noqa: BLE001 - quote enrichment is best-effort
+                # If quotes fail, we still return positions with null
+                # last_price; the aggregator handles that gracefully.
+                pass
+
         return rows
 
     async def list_balances(self) -> list[Any]:
