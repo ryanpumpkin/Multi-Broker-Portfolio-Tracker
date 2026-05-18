@@ -22,6 +22,10 @@ services:
     # Mount source for hot-reload (overrides the baked-in copy).
     volumes:
       - ./backend/app:/app/app:ro
+      # Persist the file-backed KMS master key across container rebuilds
+      # so already-encrypted credential blobs in Firestore remain
+      # decryptable. Host path matches the existing key in backend/.secrets/.
+      - ./backend/.secrets:/home/mbp/.secrets
     command:
       - uvicorn
       - app.main:app
