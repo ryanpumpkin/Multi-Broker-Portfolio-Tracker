@@ -27,6 +27,8 @@ class FakeBinanceClient:
         deposits: list[dict[str, Any]] | None = None,
         withdrawals: list[dict[str, Any]] | None = None,
         quotes: list[dict[str, Any]] | None = None,
+        klines: dict[str, list[Any]] | None = None,
+        fail_account: int = 0,
         ping_result: bool = True,
         ping_raises: Exception | None = None,
     ) -> None:
@@ -41,10 +43,19 @@ class FakeBinanceClient:
         self._deposits = deposits or []
         self._withdrawals = withdrawals or []
         self._quotes = quotes or []
+        self._klines = klines or {}
+        self._fail_account = fail_account
         self._ping_result = ping_result
         self._ping_raises = ping_raises
+        self.account_calls = 0
 
     async def get_account(self) -> dict[str, Any]:
+        self.account_calls += 1
+        if self._fail_account > 0:
+            self._fail_account -= 1
+            from app.adapters._common import TransientError
+
+            raise TransientError("rate-limited")
         return self._account
 
     async def get_my_trades(
@@ -57,6 +68,11 @@ class FakeBinanceClient:
 
     async def get_withdraw_history(self, *, since: str | None) -> list[dict[str, Any]]:
         return self._withdrawals
+
+    async def get_klines(
+        self, *, symbol: str, interval: str, limit: int
+    ) -> list[Any]:
+        return self._klines.get(symbol, [])
 
     async def get_ticker_prices(self, symbols: list[str]) -> list[dict[str, Any]]:
         return []
@@ -71,6 +87,9 @@ class FakeBinanceClient:
         if self._ping_raises is not None:
             raise self._ping_raises
         return self._ping_result
+
+    async def close(self) -> None:
+        return None
 
 
 def _no_jitter() -> RetryPolicy:
@@ -139,13 +158,19 @@ async def test_rejects_withdraw_enabled_key() -> None:
 
 @pytest.mark.asyncio
 async def test_list_positions_skips_zero_and_maps() -> None:
-    client = FakeBinanceClient(account=_read_only_account())
+    client = FakeBinanceClient(
+        account=_read_only_account(),
+        klines={"BTCUSDT": [[0, "0", "0", "0", "65000", "0"]]},
+    )
     adapter = BinanceAdapter(client, retry=_no_jitter())
     positions = await adapter.list_positions()
     symbols = {p.symbol for p in positions}
     assert symbols == {"BTC", "USDT"}
     btc = next(p for p in positions if p.symbol == "BTC")
     assert btc.quantity == Decimal("0.5")
+    assert btc.last_price == Decimal("65000")
+    assert btc.market_value == Decimal("32500.0")
+    assert btc.currency == "USDT"
 
 
 @pytest.mark.asyncio
@@ -194,6 +219,8 @@ async def test_transactions_merge_and_sort() -> None:
     sides = [t.side for t in txs]
     assert sides == ["deposit", "buy", "withdrawal"]
     assert txs[0].timestamp < txs[1].timestamp < txs[2].timestamp
+    assert txs[1].currency == "USDT"
+    assert txs[1].amount == Decimal("5000")
 
 
 @pytest.mark.asyncio
@@ -234,3 +261,25 @@ async def test_supports_binance_us_host() -> None:
     assert adapter.host is BinanceHost.US
     positions = await adapter.list_positions()
     assert any(p.symbol == "BTC" for p in positions)
+
+
+@pytest.mark.asyncio
+async def test_retries_rate_limited_account_then_succeeds() -> None:
+    client = FakeBinanceClient(account=_read_only_account(), fail_account=1)
+    adapter = BinanceAdapter(client, retry=RetryPolicy(max_attempts=3, initial_delay=0.0, jitter=0.0))
+    positions = await adapter.list_positions()
+    assert client.account_calls == 2
+    assert any(p.symbol == "BTC" for p in positions)
+
+
+@pytest.mark.asyncio
+async def test_trade_or_withdraw_key_rejected_on_transactions_init_check() -> None:
+    bad = {
+        "canTrade": True,
+        "canWithdraw": False,
+        "permissions": ["SPOT"],
+        "balances": [],
+    }
+    adapter = BinanceAdapter(FakeBinanceClient(account=bad), retry=_no_jitter())
+    with pytest.raises(PermanentError):
+        await adapter.list_transactions()

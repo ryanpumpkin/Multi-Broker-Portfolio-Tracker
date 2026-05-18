@@ -13,16 +13,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import time
+import importlib
 import urllib.parse
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, Protocol
-
-import httpx
+from typing import Any, Protocol, cast
 
 from app.adapters._common import (
     HealthTracker,
@@ -61,6 +59,10 @@ class BinanceHost(StrEnum):
             else "wss://stream.binance.us:9443"
         )
 
+    @property
+    def sdk_tld(self) -> str:
+        return "com" if self is BinanceHost.COM else "us"
+
 
 def sign_query(secret: str, params: dict[str, Any]) -> str:
     """HMAC-SHA256 sign a query-string dict, returning `query&signature=...`."""
@@ -98,11 +100,21 @@ class BinanceClient(Protocol):
         self, *, since: str | None
     ) -> list[dict[str, Any]]: ...
 
+    async def get_klines(
+        self,
+        *,
+        symbol: str,
+        interval: str,
+        limit: int,
+    ) -> list[Any]: ...
+
     async def get_ticker_prices(self, symbols: list[str]) -> list[dict[str, Any]]: ...
 
     def stream_mini_tickers(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]: ...
 
     async def ping(self) -> bool: ...
+
+    async def close(self) -> None: ...
 
 
 def _dec(v: Any) -> Decimal:
@@ -121,12 +133,18 @@ def _ts_ms(value: Any) -> datetime:
     return datetime.fromtimestamp(int(value) / 1000.0, tz=UTC)
 
 
-def _spot_balance_to_position(raw: dict[str, Any]) -> Position | None:
+def _spot_balance_to_position(
+    raw: dict[str, Any],
+    *,
+    last_price: Decimal | None = None,
+    quote_currency: str | None = None,
+) -> Position | None:
     """Map a Binance spot balance row to a Position (skipping zero balances)."""
     qty = _dec(raw["free"]) + _dec(raw.get("locked", "0"))
     if qty == 0:
         return None
     asset = raw["asset"]
+    market_value = last_price * qty if last_price is not None else None
     return Position(
         source=SOURCE_NAME,
         account_id=None,
@@ -134,9 +152,9 @@ def _spot_balance_to_position(raw: dict[str, Any]) -> Position | None:
         exchange="BINANCE",
         quantity=qty,
         avg_cost=None,
-        last_price=None,
-        currency=asset,
-        market_value=None,
+        last_price=last_price,
+        currency=quote_currency or asset,
+        market_value=market_value,
         unrealized_pnl=None,
     )
 
@@ -154,18 +172,35 @@ def _spot_balance_to_cash(raw: dict[str, Any]) -> CashBalance | None:
     )
 
 
+def _infer_quote_currency(symbol: str) -> str:
+    for suffix in ("USDT", "USDC", "BUSD", "USD", "BTC", "ETH"):
+        if symbol.endswith(suffix):
+            return suffix
+    return "USD"
+
+
 def _map_trade(raw: dict[str, Any]) -> Transaction:
     side = "buy" if raw.get("isBuyer", False) else "sell"
+    symbol = str(raw.get("symbol", ""))
+    quote_qty = _opt_dec(raw.get("quoteQty"))
+    qty = _opt_dec(raw.get("qty"))
+    price = _opt_dec(raw.get("price"))
+    amount = quote_qty
+    if amount is None and qty is not None and price is not None:
+        amount = qty * price
+    quote_currency = raw.get("quoteAsset")
+    if not isinstance(quote_currency, str) or not quote_currency:
+        quote_currency = _infer_quote_currency(symbol) if symbol else None
     return Transaction(
         source=SOURCE_NAME,
         account_id=None,
-        transaction_id=str(raw["id"]),
-        symbol=raw["symbol"],
+        transaction_id=str(raw.get("id") or raw.get("orderId") or raw.get("tradeId")),
+        symbol=symbol or None,
         side=side,
-        quantity=_opt_dec(raw.get("qty")),
-        price=_opt_dec(raw.get("price")),
-        currency=raw.get("commissionAsset"),
-        amount=_opt_dec(raw.get("quoteQty")),
+        quantity=qty,
+        price=price,
+        currency=quote_currency,
+        amount=amount,
         timestamp=_ts_ms(raw["time"]),
     )
 
@@ -206,11 +241,7 @@ def _map_quote(raw: dict[str, Any]) -> Quote:
     ts_value = raw.get("E") or raw.get("time")
     timestamp = _ts_ms(ts_value) if ts_value is not None else datetime.now(UTC)
     # Spot pairs end in USDT/USDC/BUSD/USD — treat the suffix as the quote currency.
-    currency = "USD"
-    for suffix in ("USDT", "USDC", "BUSD", "USD", "BTC", "ETH"):
-        if isinstance(symbol, str) and symbol.endswith(suffix):
-            currency = suffix
-            break
+    currency = _infer_quote_currency(symbol) if isinstance(symbol, str) else "USD"
     return Quote(
         source=SOURCE_NAME,
         symbol=symbol,
@@ -270,23 +301,61 @@ class BinanceAdapter(SourceAdapter):
         _assert_read_only(account)
         self._verified_read_only = True
 
-    async def _ensure_verified(self) -> dict[str, Any]:
-        account: dict[str, Any] = await self._call(self._client.get_account)
+    async def _get_verified_account(self) -> dict[str, Any]:
+        account = cast(dict[str, Any], await self._call(self._client.get_account))
         _assert_read_only(account)
         self._verified_read_only = True
         return account
 
+    async def _ensure_verified(self) -> None:
+        if self._verified_read_only:
+            return
+        await self.verify_read_only()
+
+    async def _price_from_klines(
+        self, *, asset: str
+    ) -> tuple[Decimal | None, str | None]:
+        for quote_currency in ("USDT", "USD"):
+            symbol = f"{asset}{quote_currency}"
+            async def _fetch_klines(symbol_for_call: str = symbol) -> list[Any]:
+                return await self._client.get_klines(
+                    symbol=symbol_for_call,
+                    interval="1m",
+                    limit=1,
+                )
+            try:
+                klines = cast(list[Any], await self._call(_fetch_klines))
+            except PermanentError:
+                continue
+            if not klines:
+                continue
+            row = klines[-1]
+            if isinstance(row, Sequence) and len(row) >= 5:
+                return _dec(row[4]), quote_currency
+            if isinstance(row, dict) and "close" in row:
+                return _dec(row["close"]), quote_currency
+        return None, None
+
     async def list_positions(self) -> list[Position]:
-        account = await self._ensure_verified()
+        account = await self._get_verified_account()
         out: list[Position] = []
         for row in account.get("balances", []):
-            pos = _spot_balance_to_position(row)
+            price: Decimal | None = None
+            price_currency: str | None = None
+            asset = row.get("asset")
+            if isinstance(asset, str) and asset not in {"USDT", "USDC", "BUSD", "USD"}:
+                price, price_currency = await self._price_from_klines(asset=asset)
+            pos = _spot_balance_to_position(
+                row,
+                last_price=price,
+                quote_currency=price_currency,
+            )
             if pos is not None:
                 out.append(pos)
         return out
 
     async def list_balances(self) -> list[CashBalance]:
-        account = await self._ensure_verified()
+        account = await self._get_verified_account()
         out: list[CashBalance] = []
         for row in account.get("balances", []):
             bal = _spot_balance_to_cash(row)
@@ -300,6 +369,8 @@ class BinanceAdapter(SourceAdapter):
         since: str | None = None,
         limit: int | None = None,
     ) -> list[Transaction]:
+        await self._ensure_verified()
+
         async def _trades() -> list[dict[str, Any]]:
             return await self._client.get_my_trades(symbol=None, since=since, limit=limit)
 
@@ -319,6 +390,7 @@ class BinanceAdapter(SourceAdapter):
         return out
 
     async def stream_quotes(self, symbols: Iterable[str]) -> AsyncIterator[Quote]:
+        await self._ensure_verified()
         async for raw in self._client.stream_mini_tickers(list(symbols)):
             yield _map_quote(raw)
 
@@ -334,91 +406,185 @@ class BinanceAdapter(SourceAdapter):
         return self._health.snapshot()
 
 
-class HttpxBinanceClient:  # pragma: no cover - real network wrapper
-    """Live Binance REST client. Excluded from coverage; tests use a fake.
+class _PythonBinanceAsyncClient(Protocol):
+    async def get_account(self, **params: Any) -> Any: ...
 
-    The mini-ticker WS stream is intentionally a stub here — real-time
-    streaming is wired in by the aggregator module; this class only exposes
-    the REST signing logic so other modules don't reinvent it.
-    """
+    async def get_my_trades(self, **params: Any) -> Any: ...
+
+    async def get_deposit_history(self, **params: Any) -> Any: ...
+
+    async def get_withdraw_history(self, **params: Any) -> Any: ...
+
+    async def get_klines(self, **params: Any) -> Any: ...
+
+    async def get_symbol_ticker(self, **params: Any) -> Any: ...
+
+    async def ping(self) -> Any: ...
+
+    async def close_connection(self) -> Any: ...
+
+
+class HttpxBinanceClient:  # pragma: no cover - real network wrapper
+    """Live Binance client wrapper backed by `python-binance` AsyncClient."""
 
     def __init__(
         self,
         creds: BinanceCredentials,
         *,
         host: BinanceHost = BinanceHost.COM,
-        http: httpx.AsyncClient | None = None,
-        recv_window_ms: int = 5000,
     ) -> None:
         self._creds = creds
         self.host = host
-        self._http = http or httpx.AsyncClient(base_url=host.rest_base, timeout=10.0)
-        self._recv_window = recv_window_ms
+        self._sdk: _PythonBinanceAsyncClient | None = None
 
-    def _signed(self, params: dict[str, Any]) -> str:
-        params = {**params, "timestamp": int(time.time() * 1000), "recvWindow": self._recv_window}
-        return sign_query(self._creds.api_secret, params)
-
-    async def _signed_get(self, path: str, params: dict[str, Any]) -> Any:
-        query = self._signed(params)
+    async def _sdk_client(self) -> _PythonBinanceAsyncClient:
+        if self._sdk is not None:
+            return self._sdk
         try:
-            resp = await self._http.get(
-                f"{path}?{query}",
-                headers={"X-MBX-APIKEY": self._creds.api_key},
-            )
-        except httpx.HTTPError as exc:
-            raise TransientError(str(exc)) from exc
-        if resp.status_code in (429, 418, 500, 502, 503, 504):
-            raise TransientError(f"binance {resp.status_code}: {resp.text}")
-        if resp.status_code >= 400:
-            raise PermanentError(f"binance {resp.status_code}: {resp.text}")
-        return resp.json()
+            module = importlib.import_module("binance.async_client")
+        except ImportError as exc:  # pragma: no cover
+            raise PermanentError("python-binance is not installed") from exc
+        async_client_cls = getattr(module, "AsyncClient", None)
+        if async_client_cls is None:  # pragma: no cover
+            raise PermanentError("python-binance AsyncClient is unavailable")
+        created = await async_client_cls.create(
+            api_key=self._creds.api_key,
+            api_secret=self._creds.api_secret,
+            tld=self.host.sdk_tld,
+        )
+        self._sdk = cast(_PythonBinanceAsyncClient, created)
+        return self._sdk
+
+    @staticmethod
+    def _to_int_ms(value: str | None) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _translate_exception(exc: Exception) -> Exception:
+        message = str(exc)
+        status_code = getattr(exc, "status_code", None)
+        if status_code in (418, 429, 500, 502, 503, 504):
+            return TransientError(message)
+        return PermanentError(message)
 
     async def get_account(self) -> dict[str, Any]:
-        result: dict[str, Any] = await self._signed_get("/api/v3/account", {})
-        return result
+        sdk = await self._sdk_client()
+        try:
+            response = await sdk.get_account()
+        except Exception as exc:
+            raise self._translate_exception(exc) from exc
+        if not isinstance(response, dict):
+            raise PermanentError("Unexpected Binance account response shape")
+        return response
 
     async def get_my_trades(
         self, *, symbol: str | None, since: str | None, limit: int | None
     ) -> list[dict[str, Any]]:
-        if symbol is None:
-            return []
         params: dict[str, Any] = {"symbol": symbol}
-        if since is not None:
-            params["startTime"] = since
+        start_time = self._to_int_ms(since)
+        if start_time is not None:
+            params["startTime"] = start_time
         if limit is not None:
             params["limit"] = limit
-        result: list[dict[str, Any]] = await self._signed_get("/api/v3/myTrades", params)
-        return result
+        sdk = await self._sdk_client()
+        try:
+            response = await sdk.get_my_trades(**params)
+        except Exception as exc:
+            if symbol is None:
+                return []
+            raise self._translate_exception(exc) from exc
+        if not isinstance(response, list):
+            raise PermanentError("Unexpected Binance myTrades response shape")
+        return [item for item in response if isinstance(item, dict)]
 
     async def get_deposit_history(self, *, since: str | None) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
-        if since is not None:
-            params["startTime"] = since
-        result: list[dict[str, Any]] = await self._signed_get(
-            "/sapi/v1/capital/deposit/hisrec", params
-        )
-        return result
+        start_time = self._to_int_ms(since)
+        if start_time is not None:
+            params["startTime"] = start_time
+        sdk = await self._sdk_client()
+        try:
+            response = await sdk.get_deposit_history(**params)
+        except Exception as exc:
+            raise self._translate_exception(exc) from exc
+        if isinstance(response, list):
+            return [item for item in response if isinstance(item, dict)]
+        if isinstance(response, dict):
+            rows = response.get("depositList", [])
+            if isinstance(rows, list):
+                return [item for item in rows if isinstance(item, dict)]
+        raise PermanentError("Unexpected Binance deposit history response shape")
 
     async def get_withdraw_history(self, *, since: str | None) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
-        if since is not None:
-            params["startTime"] = since
-        result: list[dict[str, Any]] = await self._signed_get(
-            "/sapi/v1/capital/withdraw/history", params
-        )
-        return result
+        start_time = self._to_int_ms(since)
+        if start_time is not None:
+            params["startTime"] = start_time
+        sdk = await self._sdk_client()
+        try:
+            response = await sdk.get_withdraw_history(**params)
+        except Exception as exc:
+            raise self._translate_exception(exc) from exc
+        if isinstance(response, list):
+            return [item for item in response if isinstance(item, dict)]
+        if isinstance(response, dict):
+            rows = response.get("withdrawList", [])
+            if isinstance(rows, list):
+                return [item for item in rows if isinstance(item, dict)]
+        raise PermanentError("Unexpected Binance withdraw history response shape")
+
+    async def get_klines(
+        self,
+        *,
+        symbol: str,
+        interval: str,
+        limit: int,
+    ) -> list[Any]:
+        sdk = await self._sdk_client()
+        try:
+            response = await sdk.get_klines(symbol=symbol, interval=interval, limit=limit)
+        except Exception as exc:
+            raise self._translate_exception(exc) from exc
+        if isinstance(response, list):
+            return response
+        raise PermanentError("Unexpected Binance klines response shape")
 
     async def get_ticker_prices(self, symbols: list[str]) -> list[dict[str, Any]]:
-        resp = await self._http.get("/api/v3/ticker/price")
-        return list(resp.json())
+        sdk = await self._sdk_client()
+        if not symbols:
+            return []
+        out: list[dict[str, Any]] = []
+        for symbol in symbols:
+            try:
+                row = await sdk.get_symbol_ticker(symbol=symbol)
+            except Exception as exc:
+                raise self._translate_exception(exc) from exc
+            if isinstance(row, dict):
+                out.append(row)
+        return out
 
     def stream_mini_tickers(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]:
         raise NotImplementedError("WS streaming is wired up by the aggregator module")
 
     async def ping(self) -> bool:
         try:
-            resp = await self._http.get("/api/v3/ping")
-        except httpx.HTTPError:
+            sdk = await self._sdk_client()
+            await sdk.ping()
+        except Exception:
             return False
-        return resp.status_code == 200
+        return True
+
+    async def close(self) -> None:
+        sdk = self._sdk
+        if sdk is None:
+            return
+        self._sdk = None
+        try:
+            await sdk.close_connection()
+        except Exception:
+            return
