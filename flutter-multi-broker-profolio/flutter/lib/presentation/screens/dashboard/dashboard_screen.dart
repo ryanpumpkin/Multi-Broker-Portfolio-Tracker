@@ -18,6 +18,22 @@ class DashboardScreen extends ConsumerWidget {
     return PresentationScaffold(
       selectedRoute: AppRoutes.dashboard,
       title: 'Dashboard',
+      actions: [
+        IconButton(
+          key: const Key('dashboard_refresh_button'),
+          tooltip: 'Refresh',
+          icon: portfolio.isLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.refresh),
+          onPressed: portfolio.isLoading
+              ? null
+              : () => ref.read(portfolioProvider.notifier).refresh(),
+        ),
+      ],
       body: RefreshIndicator(
         onRefresh: () => ref.read(portfolioProvider.notifier).refresh(),
         child: ListView(
