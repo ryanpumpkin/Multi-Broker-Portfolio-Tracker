@@ -18,19 +18,23 @@ class Mappers {
   // ---------------- Position ---------------------------------------------
 
   static Position positionFromJson(Map<String, dynamic> j) {
+    // Accept both camelCase (legacy fixtures) and snake_case (backend wire).
+    final symbol = (j['symbol'] as String?) ?? '';
     return Position(
-      sourceId: j['sourceId'] as String,
-      symbol: j['symbol'] as String,
-      name: j['name'] as String? ?? j['symbol'] as String,
+      sourceId: (j['sourceId'] as String?) ?? (j['source'] as String?) ?? '',
+      symbol: symbol,
+      name: (j['name'] as String?) ?? symbol,
       assetClass: assetClassFromString(
-        j['assetClass'] as String? ?? 'other',
+        (j['assetClass'] as String?) ??
+            (j['asset_class'] as String?) ??
+            'other',
       ),
       quantity: _num(j['quantity']),
-      avgCost: _num(j['avgCost']),
-      currentPrice: _num(j['currentPrice']),
-      currency: j['currency'] as String,
-      marketValue: _num(j['marketValue']),
-      unrealizedPnl: _num(j['unrealizedPnl']),
+      avgCost: _num(j['avgCost'] ?? j['avg_cost']),
+      currentPrice: _num(j['currentPrice'] ?? j['last_price']),
+      currency: (j['currency'] as String?) ?? 'USD',
+      marketValue: _num(j['marketValue'] ?? j['market_value']),
+      unrealizedPnl: _num(j['unrealizedPnl'] ?? j['unrealized_pnl']),
     );
   }
 
@@ -70,9 +74,9 @@ class Mappers {
 
   static CashBalance cashBalanceFromJson(Map<String, dynamic> j) {
     return CashBalance(
-      sourceId: j['sourceId'] as String,
-      currency: j['currency'] as String,
-      available: _num(j['available']),
+      sourceId: (j['sourceId'] as String?) ?? (j['source'] as String?) ?? '',
+      currency: (j['currency'] as String?) ?? 'USD',
+      available: _num(j['available'] ?? j['amount']),
     );
   }
 
