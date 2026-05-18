@@ -29,7 +29,12 @@ FROM python:3.11-slim AS runtime
 
 # ── Non-root user ────────────────────────────────────────────────────────────
 RUN groupadd --gid 1001 mbp && \
-    useradd --uid 1001 --gid mbp --no-create-home --shell /usr/sbin/nologin mbp
+    useradd --uid 1001 --gid mbp --shell /usr/sbin/nologin --home-dir /home/mbp mbp && \
+    mkdir -p /home/mbp && chown mbp:mbp /home/mbp
+
+# Some broker SDKs (notably futu-api) read/write per-user config files in
+# $HOME on import. Provide a writable home dir for the mbp user.
+ENV HOME=/home/mbp
 
 WORKDIR /app
 

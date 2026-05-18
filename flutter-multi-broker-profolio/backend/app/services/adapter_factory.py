@@ -12,6 +12,9 @@ from app.adapters.binance.adapter import (
     BinanceHost,
     HttpxBinanceClient,
 )
+from app.adapters.ibkr.adapter import IbkrAdapter, IBKRClient
+from app.adapters.longbridge.adapter import LongBridgeAdapter
+from app.adapters.longbridge.client import LongbridgeClient
 
 
 class AdapterFactoryError(ValueError):
@@ -40,7 +43,12 @@ class AdapterFactory:
         if builders is not None:
             self._builders = {key.lower(): value for key, value in builders.items()}
         else:
-            self._builders = {"binance": _build_binance_adapter}
+            self._builders = {
+                "binance": _build_binance_adapter,
+                "longbridge": _build_longbridge_adapter,
+                "ibkr": _build_ibkr_adapter,
+                "futu": _build_futu_adapter,
+            }
 
     def for_connection(self, *, connection_kind: str, plaintext_creds: str) -> SourceAdapter:
         kind = connection_kind.strip().lower()
@@ -81,6 +89,43 @@ def _build_binance_adapter(credentials: dict[str, Any]) -> SourceAdapter:
         host=host,
     )
     return BinanceAdapter(client)
+
+
+def _build_longbridge_adapter(credentials: dict[str, Any]) -> SourceAdapter:
+    app_key = _pick_str(credentials, "appKey", "app_key")
+    app_secret = _pick_str(credentials, "appSecret", "app_secret")
+    access_token = _pick_str(credentials, "accessToken", "access_token")
+
+    client = LongbridgeClient(
+        app_key=app_key,
+        app_secret=app_secret,
+        access_token=access_token,
+    )
+    return LongBridgeAdapter(client)
+
+
+def _build_ibkr_adapter(credentials: dict[str, Any]) -> SourceAdapter:
+    # IBKR creds are validated for shape but the actual login happens at the
+    # sidecar gateway. We only forward the optional account_id; user/pass
+    # configure the gateway container itself (see infra/README.md).
+    account_id = _pick_optional_str(credentials, "accountId", "account_id")
+    client = IBKRClient(account_id=account_id)
+    return IbkrAdapter(client)
+
+
+def _build_futu_adapter(credentials: dict[str, Any]) -> SourceAdapter:
+    # The OpenD sidecar already holds account login. We accept optional
+    # acc_id + trd_env overrides; the trade unlock password is captured
+    # per-request via the credential context middleware.
+    from app.adapters.futu.adapter import FutuAdapter
+    from app.adapters.futu.client import FutuOpenDClient
+
+    acc_id_raw = _pick_optional_str(credentials, "accId", "acc_id")
+    acc_id = int(acc_id_raw) if acc_id_raw and acc_id_raw.isdigit() else None
+    trd_env = _pick_optional_str(credentials, "trdEnv", "trd_env")
+
+    client = FutuOpenDClient(acc_id=acc_id, trd_env=trd_env)
+    return FutuAdapter(client)
 
 
 def _pick_str(payload: dict[str, Any], *keys: str) -> str:
