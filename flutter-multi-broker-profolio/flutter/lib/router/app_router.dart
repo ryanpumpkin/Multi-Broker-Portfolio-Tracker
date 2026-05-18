@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../i18n/generated/app_localizations.dart';
 import '../logging/logger.dart';
+import '../presentation/auth/auth_screens.dart';
+import '../presentation/screens/screens.dart';
 
 /// Stable path constants for every screen referenced in the design.
 ///
@@ -12,6 +14,8 @@ import '../logging/logger.dart';
 class AppRoutes {
   AppRoutes._();
   static const String signIn = '/auth/sign-in';
+  static const String signUp = '/auth/sign-up';
+  static const String passwordReset = '/auth/password-reset';
   static const String onboarding = '/onboarding';
   static const String dashboard = '/';
   static const String positions = '/positions';
@@ -20,15 +24,12 @@ class AppRoutes {
   static const String connections = '/connections';
   static const String alerts = '/alerts';
   static const String settings = '/settings';
+  static const String manualHoldings = '/connections/manual';
   static const String debugLogViewer = '/settings/debug/logs';
 }
 
 /// Builds the application's [GoRouter].
 ///
-/// The router is intentionally configured with placeholder screens — the
-/// presentation module will replace each `_Placeholder` with a real widget.
-/// Registering every route up front means deep links and tests work from
-/// day one.
 GoRouter buildAppRouter({String initialLocation = AppRoutes.dashboard}) {
   return GoRouter(
     initialLocation: initialLocation,
@@ -36,52 +37,62 @@ GoRouter buildAppRouter({String initialLocation = AppRoutes.dashboard}) {
       GoRoute(
         path: AppRoutes.dashboard,
         name: 'dashboard',
-        builder: (_, __) => const _Placeholder(titleKey: _TitleKey.dashboard),
+        builder: (_, __) => const DashboardScreen(),
       ),
       GoRoute(
         path: AppRoutes.signIn,
         name: 'sign-in',
-        builder: (_, __) => const _Placeholder(titleKey: _TitleKey.signIn),
+        builder: (context, __) => SignInScreen(
+          onCreateAccount: () => context.go(AppRoutes.signUp),
+          onForgotPassword: () => context.go(AppRoutes.passwordReset),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.signUp,
+        name: 'sign-up',
+        builder: (context, __) => SignUpScreen(
+          onSignedUp: () => context.go(AppRoutes.dashboard),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.passwordReset,
+        name: 'password-reset',
+        builder: (_, __) => const PasswordResetScreen(),
       ),
       GoRoute(
         path: AppRoutes.onboarding,
         name: 'onboarding',
-        builder: (_, __) =>
-            const _Placeholder(titleKey: _TitleKey.onboarding),
+        builder: (_, __) => const OnboardingScreen(),
       ),
       GoRoute(
         path: AppRoutes.positions,
         name: 'positions',
-        builder: (_, __) =>
-            const _Placeholder(titleKey: _TitleKey.positions),
+        builder: (_, __) => const PositionsScreen(),
       ),
       GoRoute(
         path: AppRoutes.charts,
         name: 'charts',
-        builder: (_, __) => const _Placeholder(titleKey: _TitleKey.charts),
+        builder: (_, __) => const ChartsScreen(),
       ),
       GoRoute(
         path: AppRoutes.transactions,
         name: 'transactions',
-        builder: (_, __) =>
-            const _Placeholder(titleKey: _TitleKey.transactions),
+        builder: (_, __) => const TransactionsScreen(),
       ),
       GoRoute(
         path: AppRoutes.connections,
         name: 'connections',
-        builder: (_, __) =>
-            const _Placeholder(titleKey: _TitleKey.connections),
+        builder: (_, __) => const ConnectionsScreen(),
       ),
       GoRoute(
         path: AppRoutes.alerts,
         name: 'alerts',
-        builder: (_, __) => const _Placeholder(titleKey: _TitleKey.alerts),
+        builder: (_, __) => const AlertsScreen(),
       ),
       GoRoute(
         path: AppRoutes.settings,
         name: 'settings',
-        builder: (_, __) =>
-            const _Placeholder(titleKey: _TitleKey.settings),
+        builder: (_, __) => const SettingsScreen(),
         routes: <RouteBase>[
           GoRoute(
             path: 'debug/logs',
@@ -89,6 +100,11 @@ GoRouter buildAppRouter({String initialLocation = AppRoutes.dashboard}) {
             builder: (_, __) => const DebugLogViewerScreen(),
           ),
         ],
+      ),
+      GoRoute(
+        path: AppRoutes.manualHoldings,
+        name: 'manual-holdings',
+        builder: (_, __) => const ManualHoldingsScreen(),
       ),
     ],
   );
@@ -99,54 +115,6 @@ GoRouter buildAppRouter({String initialLocation = AppRoutes.dashboard}) {
 /// Debug & profile builds: yes. Release builds: no (the screen stays
 /// reachable so deep links don't 404, but renders an empty state).
 bool get debugLogViewerEnabled => !kReleaseMode;
-
-enum _TitleKey {
-  signIn,
-  onboarding,
-  dashboard,
-  positions,
-  charts,
-  transactions,
-  connections,
-  alerts,
-  settings,
-}
-
-String _titleFor(_TitleKey k, AppLocalizations l) {
-  switch (k) {
-    case _TitleKey.signIn:
-    case _TitleKey.onboarding:
-      return l.appTitle;
-    case _TitleKey.dashboard:
-      return l.navDashboard;
-    case _TitleKey.positions:
-      return l.navPositions;
-    case _TitleKey.charts:
-      return l.navCharts;
-    case _TitleKey.transactions:
-      return l.navTransactions;
-    case _TitleKey.connections:
-      return l.navConnections;
-    case _TitleKey.alerts:
-      return l.navAlerts;
-    case _TitleKey.settings:
-      return l.navSettings;
-  }
-}
-
-class _Placeholder extends StatelessWidget {
-  const _Placeholder({required this.titleKey});
-  final _TitleKey titleKey;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    return Scaffold(
-      appBar: AppBar(title: Text(_titleFor(titleKey, l))),
-      body: Center(child: Text(l.placeholderScreen)),
-    );
-  }
-}
 
 /// Debug-only screen that lists in-memory log records.
 ///

@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:multi_broker_portfolio/app.dart';
 import 'package:multi_broker_portfolio/i18n/generated/app_localizations.dart';
+
+import 'presentation/presentation_test_harness.dart';
 
 void main() {
   testWidgets('boots with English locale', (tester) async {
     await tester.pumpWidget(
-      const MultiBrokerPortfolioApp(localeOverride: Locale('en')),
+      ProviderScope(
+        overrides: buildPresentationTestOverrides(),
+        child: const MultiBrokerPortfolioApp(localeOverride: Locale('en')),
+      ),
     );
     await tester.pumpAndSettle();
     final ctx = tester.element(find.byType(Scaffold));
@@ -15,10 +21,13 @@ void main() {
 
   testWidgets('boots with zh_Hant locale', (tester) async {
     await tester.pumpWidget(
-      const MultiBrokerPortfolioApp(
-        localeOverride: Locale.fromSubtags(
-          languageCode: 'zh',
-          scriptCode: 'Hant',
+      ProviderScope(
+        overrides: buildPresentationTestOverrides(),
+        child: const MultiBrokerPortfolioApp(
+          localeOverride: Locale.fromSubtags(
+            languageCode: 'zh',
+            scriptCode: 'Hant',
+          ),
         ),
       ),
     );
@@ -29,9 +38,12 @@ void main() {
 
   testWidgets('respects themeMode override', (tester) async {
     await tester.pumpWidget(
-      const MultiBrokerPortfolioApp(
-        themeModeOverride: ThemeMode.dark,
-        localeOverride: Locale('en'),
+      ProviderScope(
+        overrides: buildPresentationTestOverrides(),
+        child: const MultiBrokerPortfolioApp(
+          themeModeOverride: ThemeMode.dark,
+          localeOverride: Locale('en'),
+        ),
       ),
     );
     await tester.pumpAndSettle();

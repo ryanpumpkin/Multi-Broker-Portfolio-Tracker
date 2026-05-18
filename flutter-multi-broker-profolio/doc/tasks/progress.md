@@ -8,7 +8,7 @@ Each module has its own task file under `doc/tasks/`. Tick a module here once **
 - [x] [flutter-domain](./flutter-domain.md) — entities, repo interfaces, use cases (54 domain tests passing, 99% domain coverage, lint clean)
 - [x] [flutter-data](./flutter-data.md) — Drift, secure storage, E2E crypto, remote clients, repos (166 tests passing, lint clean; 87.47% coverage on hand-written `lib/data/*` excluding generated `app_database.g.dart`)
 - [x] [flutter-state](./flutter-state.md) — Riverpod providers (184 tests passing, `flutter analyze` clean, `lib/state/*` coverage 94.12%)
-- [~] [flutter-presentation](./flutter-presentation.md) — all screens and widgets
+- [x] [flutter-presentation](./flutter-presentation.md) — all screens and widgets (234 tests passing, `flutter analyze` clean, `lib/presentation/*` coverage 80.90%)
 - [x] [flutter-auth-and-lock](./flutter-auth-and-lock.md) — Firebase Auth + biometric/PIN lock (209 tests passing, `flutter analyze` clean, auth/lock coverage 87.37%)
 - [x] [flutter-notifications](./flutter-notifications.md) — FCM client integration
 
