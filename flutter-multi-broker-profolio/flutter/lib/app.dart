@@ -1,3 +1,5 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
@@ -38,7 +40,22 @@ class MultiBrokerPortfolioApp extends StatefulWidget {
 }
 
 class _MultiBrokerPortfolioAppState extends State<MultiBrokerPortfolioApp> {
-  late final GoRouter _router = widget.routerOverride ?? buildAppRouter();
+  late final GoRouter _router = widget.routerOverride ?? _buildDefaultRouter();
+
+  GoRouter _buildDefaultRouter() {
+    // Tests render this widget without initialising Firebase. Detect that
+    // case and fall back to a router with no auth guard so widget tests
+    // keep working.
+    if (Firebase.apps.isEmpty) {
+      return buildAppRouter();
+    }
+    return buildAppRouter(
+      isAuthenticated: () => FirebaseAuth.instance.currentUser != null,
+      authRefreshListenable: GoRouterRefreshStream(
+        FirebaseAuth.instance.authStateChanges(),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

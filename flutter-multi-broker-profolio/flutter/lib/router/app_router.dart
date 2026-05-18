@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -30,9 +32,34 @@ class AppRoutes {
 
 /// Builds the application's [GoRouter].
 ///
-GoRouter buildAppRouter({String initialLocation = AppRoutes.dashboard}) {
+/// Signature of an auth-state predicate used by the router redirect. The
+/// router calls this on every navigation to decide whether to push the
+/// user to /auth/sign-in. Production wires it to Firebase Auth; tests
+/// pass an always-authed (or always-unauthed) stub.
+typedef AuthStateSnapshot = bool Function();
+
+GoRouter buildAppRouter({
+  String initialLocation = AppRoutes.dashboard,
+  AuthStateSnapshot? isAuthenticated,
+  Listenable? authRefreshListenable,
+}) {
+  // When `isAuthenticated` is not supplied (tests, isolated harnesses),
+  // skip the redirect entirely so every route is reachable. Production
+  // wiring lives in `app.dart` and supplies a real check.
+  GoRouterRedirect? redirect;
+  if (isAuthenticated != null) {
+    redirect = (context, state) {
+      final isAuthRoute = state.matchedLocation.startsWith('/auth/');
+      final signedIn = isAuthenticated();
+      if (!signedIn && !isAuthRoute) return AppRoutes.signIn;
+      if (signedIn && isAuthRoute) return AppRoutes.dashboard;
+      return null;
+    };
+  }
   return GoRouter(
     initialLocation: initialLocation,
+    refreshListenable: authRefreshListenable,
+    redirect: redirect,
     routes: <RouteBase>[
       GoRoute(
         path: AppRoutes.dashboard,
@@ -141,5 +168,24 @@ class DebugLogViewerScreen extends StatelessWidget {
               ),
             ),
     );
+  }
+}
+
+/// Bridges a [Stream] (e.g. `FirebaseAuth.authStateChanges()`) into a
+/// `Listenable` so `GoRouter` re-evaluates its `redirect` whenever the
+/// auth state changes — pushing signed-out users to /auth/sign-in and
+/// signed-in users away from auth screens.
+class GoRouterRefreshStream extends ChangeNotifier {
+  GoRouterRefreshStream(Stream<dynamic> stream) {
+    notifyListeners();
+    _sub = stream.asBroadcastStream().listen((_) => notifyListeners());
+  }
+
+  late final StreamSubscription<dynamic> _sub;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
   }
 }
