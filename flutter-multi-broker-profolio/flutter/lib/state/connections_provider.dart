@@ -64,6 +64,9 @@ class ConnectionsState {
 class ConnectionsController extends AsyncNotifier<ConnectionsState> {
   @override
   Future<ConnectionsState> build() async {
+    // Rebuild when the signed-in user changes so we re-query Firestore
+    // under the correct uid.
+    ref.watch(currentUserIdProvider);
     final connections = await ref.read(connectionsRepositoryProvider).list();
     return ConnectionsState.fromConnections(connections);
   }

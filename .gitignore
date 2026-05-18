@@ -1,5 +1,10 @@
 node_modules/
 data/
+# Re-include the Flutter data layer (it's source code, not data files).
+!flutter-multi-broker-profolio/flutter/lib/data/
+!flutter-multi-broker-profolio/flutter/lib/data/**
+!flutter-multi-broker-profolio/flutter/test/data/
+!flutter-multi-broker-profolio/flutter/test/data/**
 .DS_Store
 *.log
 .env

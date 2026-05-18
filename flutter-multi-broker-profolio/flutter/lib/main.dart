@@ -3,6 +3,7 @@
 // this file is excluded from coverage. Logic worth testing lives in
 // `app.dart`, `router/`, `theme/`, `i18n/`, and `logging/`.
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +18,24 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Ensure we always have a Firebase user so Firestore reads/writes scoped
+  // under /users/{uid}/ work. If the user later signs in with email/password,
+  // their data can be migrated from the anonymous account.
+  if (FirebaseAuth.instance.currentUser == null) {
+    try {
+      await FirebaseAuth.instance.signInAnonymously();
+    } catch (e, st) {
+      // Anonymous auth must be enabled in the Firebase console under
+      // Authentication → Sign-in method → Anonymous.
+      AppLogger.instance.error(
+        'Anonymous sign-in failed; enable Anonymous auth in Firebase console.',
+        name: 'bootstrap',
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
 
   // Initialize the structured logger. Firebase Crashlytics wiring is added
   // by the `flutter-notifications` / Firebase setup steps; for now the

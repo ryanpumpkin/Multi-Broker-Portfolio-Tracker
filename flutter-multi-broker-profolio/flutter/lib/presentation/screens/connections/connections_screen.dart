@@ -172,17 +172,25 @@ class ConnectionsScreen extends ConsumerWidget {
                   key: const Key('connection_save_button'),
                   onPressed: () async {
                     if (!formKey.currentState!.validate()) return;
-                    await ref.read(connectionsProvider.notifier).add(
-                          Connection(
-                            id: 'conn-${DateTime.now().millisecondsSinceEpoch}',
-                            kind: kind,
-                            label: label.text.trim(),
-                            status: ConnectionStatus.unknown,
-                            credentialMode: mode,
-                          ),
-                        );
-                    if (!context.mounted) return;
-                    Navigator.of(context).pop();
+                    final messenger = ScaffoldMessenger.of(context);
+                    final navigator = Navigator.of(context);
+                    try {
+                      await ref.read(connectionsProvider.notifier).add(
+                            Connection(
+                              id: 'conn-${DateTime.now().millisecondsSinceEpoch}',
+                              kind: kind,
+                              label: label.text.trim(),
+                              status: ConnectionStatus.unknown,
+                              credentialMode: mode,
+                            ),
+                          );
+                      if (!context.mounted) return;
+                      navigator.pop();
+                    } catch (e) {
+                      messenger.showSnackBar(
+                        SnackBar(content: Text('Failed to save: $e')),
+                      );
+                    }
                   },
                   child: const Text('Save'),
                 ),
