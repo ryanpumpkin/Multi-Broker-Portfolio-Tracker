@@ -14,6 +14,9 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           authRepositoryProvider.overrideWithValue(repo),
+          notificationLifecycleProvider.overrideWithValue(
+            _NoopNotificationLifecycle(),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -35,6 +38,9 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           authRepositoryProvider.overrideWithValue(repo),
+          notificationLifecycleProvider.overrideWithValue(
+            _NoopNotificationLifecycle(),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -54,6 +60,9 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           authRepositoryProvider.overrideWithValue(repo),
+          notificationLifecycleProvider.overrideWithValue(
+            _NoopNotificationLifecycle(),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -318,6 +327,9 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           alertsRepositoryProvider.overrideWithValue(repo),
+          notificationLifecycleProvider.overrideWithValue(
+            _NoopNotificationLifecycle(),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -889,6 +901,17 @@ class _FakeBiometricAuthenticator implements BiometricAuthenticator {
 
   @override
   Future<bool> isAvailable() async => true;
+}
+
+class _NoopNotificationLifecycle implements NotificationLifecycle {
+  @override
+  Future<void> ensureInitializedForUser(String userId) async {}
+
+  @override
+  Future<void> onBeforeSignOut() async {}
+
+  @override
+  Future<void> onFirstAlertCreateAttempt() async {}
 }
 
 Connection _connection({

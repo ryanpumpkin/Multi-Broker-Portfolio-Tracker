@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/repositories/auth_repository_impl.dart';
 import '../domain/domain.dart';
+import 'notifications_provider.dart';
 import 'repository_providers.dart';
 
 final authProvider =
@@ -25,7 +26,13 @@ class AuthController extends AsyncNotifier<AuthUser?> {
       },
     );
     ref.onDispose(() => _subscription?.cancel());
-    return repo.currentUser();
+    final user = await repo.currentUser();
+    if (user != null) {
+      await ref
+          .read(notificationLifecycleProvider)
+          .ensureInitializedForUser(user.uid);
+    }
+    return user;
   }
 
   Future<AuthUser> signIn({
@@ -37,6 +44,9 @@ class AuthController extends AsyncNotifier<AuthUser?> {
       final user = await ref
           .read(authRepositoryProvider)
           .signIn(email: email, password: password);
+      await ref
+          .read(notificationLifecycleProvider)
+          .ensureInitializedForUser(user.uid);
       state = AsyncData(user);
       return user;
     } catch (error, stackTrace) {
@@ -54,6 +64,9 @@ class AuthController extends AsyncNotifier<AuthUser?> {
       final user = await ref
           .read(authRepositoryProvider)
           .signUp(email: email, password: password);
+      await ref
+          .read(notificationLifecycleProvider)
+          .ensureInitializedForUser(user.uid);
       state = AsyncData(user);
       return user;
     } catch (error, stackTrace) {
@@ -65,6 +78,7 @@ class AuthController extends AsyncNotifier<AuthUser?> {
   Future<void> signOut() async {
     state = const AsyncLoading();
     try {
+      await ref.read(notificationLifecycleProvider).onBeforeSignOut();
       await ref.read(authRepositoryProvider).signOut();
       state = const AsyncData(null);
     } catch (error, stackTrace) {

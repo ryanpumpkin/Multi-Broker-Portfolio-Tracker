@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/domain.dart';
+import 'notifications_provider.dart';
 import 'repository_providers.dart';
 
 final alertsProvider = AsyncNotifierProvider<AlertsController, AlertsState>(
@@ -67,6 +68,7 @@ class AlertsController extends AsyncNotifier<AlertsState> {
   }
 
   Future<Alert> create(Alert alert) async {
+    await ref.read(notificationLifecycleProvider).onFirstAlertCreateAttempt();
     final created = await ref.read(alertsRepositoryProvider).create(alert);
     final current = state.value;
     if (current != null) {
@@ -155,6 +157,32 @@ class AlertsController extends AsyncNotifier<AlertsState> {
       ),
     );
     return true;
+  }
+
+  Future<void> recordRemoteTrigger(
+    String alertId, {
+    PriceQuote? quote,
+  }) async {
+    final current = state.value;
+    if (current == null) return;
+
+    final history = <AlertTriggerEvent>[
+      AlertTriggerEvent(
+        alertId: alertId,
+        triggeredAt: DateTime.now().toUtc(),
+        quote: quote,
+        portfolioUnrealizedPnlPct: null,
+      ),
+      ...current.triggerHistory,
+    ];
+    if (history.length > _maxHistory) {
+      history.removeRange(_maxHistory, history.length);
+    }
+    state = AsyncData(
+      current.copyWith(
+        triggerHistory: List<AlertTriggerEvent>.unmodifiable(history),
+      ),
+    );
   }
 
   void clearTriggerHistory() {

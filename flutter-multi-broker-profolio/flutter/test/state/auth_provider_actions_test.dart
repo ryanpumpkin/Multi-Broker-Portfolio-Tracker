@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:multi_broker_portfolio/data/repositories/auth_repository_impl.dart';
 import 'package:multi_broker_portfolio/domain/domain.dart';
 import 'package:multi_broker_portfolio/state/auth_provider.dart';
+import 'package:multi_broker_portfolio/state/notifications_provider.dart';
 import 'package:multi_broker_portfolio/state/repository_providers.dart';
 
 void main() {
@@ -13,7 +14,12 @@ void main() {
         () async {
       final repo = _CapableAuthRepository();
       final container = ProviderContainer(
-        overrides: [authRepositoryProvider.overrideWithValue(repo)],
+        overrides: [
+          authRepositoryProvider.overrideWithValue(repo),
+          notificationLifecycleProvider.overrideWithValue(
+            _NoopNotificationLifecycle(),
+          ),
+        ],
       );
       addTearDown(container.dispose);
 
@@ -26,7 +32,12 @@ void main() {
     test('sendPasswordResetEmail throws when capability is missing', () async {
       final repo = _SimpleAuthRepository();
       final container = ProviderContainer(
-        overrides: [authRepositoryProvider.overrideWithValue(repo)],
+        overrides: [
+          authRepositoryProvider.overrideWithValue(repo),
+          notificationLifecycleProvider.overrideWithValue(
+            _NoopNotificationLifecycle(),
+          ),
+        ],
       );
       addTearDown(container.dispose);
 
@@ -41,7 +52,12 @@ void main() {
     test('social sign-in updates provider state', () async {
       final repo = _CapableAuthRepository();
       final container = ProviderContainer(
-        overrides: [authRepositoryProvider.overrideWithValue(repo)],
+        overrides: [
+          authRepositoryProvider.overrideWithValue(repo),
+          notificationLifecycleProvider.overrideWithValue(
+            _NoopNotificationLifecycle(),
+          ),
+        ],
       );
       addTearDown(container.dispose);
 
@@ -59,7 +75,12 @@ void main() {
     test('social sign-in throws when capability is missing', () async {
       final repo = _SimpleAuthRepository();
       final container = ProviderContainer(
-        overrides: [authRepositoryProvider.overrideWithValue(repo)],
+        overrides: [
+          authRepositoryProvider.overrideWithValue(repo),
+          notificationLifecycleProvider.overrideWithValue(
+            _NoopNotificationLifecycle(),
+          ),
+        ],
       );
       addTearDown(container.dispose);
 
@@ -73,6 +94,17 @@ void main() {
       );
     });
   });
+}
+
+class _NoopNotificationLifecycle implements NotificationLifecycle {
+  @override
+  Future<void> ensureInitializedForUser(String userId) async {}
+
+  @override
+  Future<void> onBeforeSignOut() async {}
+
+  @override
+  Future<void> onFirstAlertCreateAttempt() async {}
 }
 
 class _SimpleAuthRepository implements AuthRepository {
