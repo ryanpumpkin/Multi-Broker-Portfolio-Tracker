@@ -209,8 +209,8 @@ class BackendClient {
   }) =>
       _send(
         'GET',
-        '/portfolio/snapshot',
-        query: <String, dynamic>{'base': baseCurrency},
+        '/portfolio',
+        query: <String, dynamic>{'base_currency': baseCurrency},
         extraHeaders: _credentialHeaders(
           wrappedCredsByConnection: wrappedCredsByConnection,
           wrappedCredsKeyBytes: wrappedCredsKeyBytes,
