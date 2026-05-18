@@ -134,196 +134,10 @@ class ConnectionsScreen extends ConsumerWidget {
       return;
     }
 
-    final formKey = GlobalKey<FormState>();
-    var kind = ConnectionKind.longbridge;
-    var mode = CredentialMode.e2e;
-    final label = TextEditingController();
-    final credCtrls = <String, TextEditingController>{};
-
-    TextEditingController ctrlFor(String key) =>
-        credCtrls.putIfAbsent(key, TextEditingController.new);
-
     await showDialog<void>(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            final fields = _credentialFields[kind] ?? const [];
-            return AlertDialog(
-              title: const Text('Add connection'),
-              content: SizedBox(
-                width: 420,
-                child: SingleChildScrollView(
-                  child: Form(
-                    key: formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        DropdownButtonFormField<ConnectionKind>(
-                          key: const Key('connection_kind_picker'),
-                          initialValue: kind,
-                          items: ConnectionKind.values
-                              .where((k) => k != ConnectionKind.manual)
-                              .map(
-                                (k) => DropdownMenuItem(
-                                  value: k,
-                                  child: Text(k.name),
-                                ),
-                              )
-                              .toList(growable: false),
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() => kind = value);
-                            }
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        TextFormField(
-                          key: const Key('connection_label_input'),
-                          controller: label,
-                          decoration: const InputDecoration(
-                            labelText: 'Display label',
-                          ),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Label is required';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        DropdownButtonFormField<CredentialMode>(
-                          initialValue: mode,
-                          items: const [
-                            DropdownMenuItem(
-                              value: CredentialMode.e2e,
-                              child: Text('E2E'),
-                            ),
-                            DropdownMenuItem(
-                              value: CredentialMode.serverKey,
-                              child: Text('Server key'),
-                            ),
-                          ],
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() => mode = value);
-                            }
-                          },
-                        ),
-                        if (fields.isNotEmpty) ...[
-                          const SizedBox(height: 16),
-                          Text(
-                            'Credentials',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Encrypted on this device with your PIN before '
-                            'leaving the app.',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 8),
-                          ...fields.map((f) {
-                            final (key, lbl, obscure) = f;
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: TextFormField(
-                                key: Key('cred_field_$key'),
-                                controller: ctrlFor(key),
-                                obscureText: obscure,
-                                decoration: InputDecoration(labelText: lbl),
-                                validator: (value) {
-                                  if (value == null || value.trim().isEmpty) {
-                                    return '$lbl is required';
-                                  }
-                                  return null;
-                                },
-                              ),
-                            );
-                          }),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                FilledButton(
-                  key: const Key('connection_save_button'),
-                  onPressed: () async {
-                    if (!formKey.currentState!.validate()) return;
-                    final messenger = ScaffoldMessenger.of(context);
-                    final navigator = Navigator.of(context);
-                    try {
-                      final id =
-                          'conn-${DateTime.now().millisecondsSinceEpoch}';
-                      await ref.read(connectionsProvider.notifier).add(
-                            Connection(
-                              id: id,
-                              kind: kind,
-                              label: label.text.trim(),
-                              status: ConnectionStatus.unknown,
-                              credentialMode: mode,
-                            ),
-                          );
-
-                      // Encrypt and persist credentials if any were provided.
-                      if (fields.isNotEmpty) {
-                        final creds = <String, String>{
-                          for (final (key, _, _) in fields)
-                            key: credCtrls[key]?.text.trim() ?? '',
-                        };
-                        final key = ref.read(credentialKeyProvider);
-                        if (key == null) {
-                          throw StateError(
-                            'Credential key missing. Unlock with your PIN '
-                            'and try again.',
-                          );
-                        }
-                        final ct = await E2eCrypto.production()
-                            .encrypt(jsonEncode(creds), key);
-                        final blob = base64Encode(
-                          utf8.encode(jsonEncode(ct.toEncoded())),
-                        );
-                        await ref
-                            .read(connectionsProvider.notifier)
-                            .setCredentials(id, blob);
-                      }
-
-                      if (!context.mounted) return;
-                      navigator.pop();
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Saved ${kind.name} connection "${label.text.trim()}". '
-                            'Pull-to-refresh the dashboard to sync.',
-                          ),
-                        ),
-                      );
-                    } catch (e) {
-                      messenger.showSnackBar(
-                        SnackBar(content: Text('Failed to save: $e')),
-                      );
-                    }
-                  },
-                  child: const Text('Save'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (_) => const _AddConnectionDialog(),
     );
-
-    for (final c in credCtrls.values) {
-      c.dispose();
-    }
-    label.dispose();
   }
 
   Future<void> _showPinRequiredDialog(
@@ -362,6 +176,215 @@ class ConnectionsScreen extends ConsumerWidget {
     return showDialog<void>(
       context: context,
       builder: (_) => const _PinEntryDialog(),
+    );
+  }
+}
+
+class _AddConnectionDialog extends ConsumerStatefulWidget {
+  const _AddConnectionDialog();
+
+  @override
+  ConsumerState<_AddConnectionDialog> createState() =>
+      _AddConnectionDialogState();
+}
+
+class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _label = TextEditingController();
+  final _credCtrls = <String, TextEditingController>{};
+
+  ConnectionKind _kind = ConnectionKind.longbridge;
+  CredentialMode _mode = CredentialMode.e2e;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _label.dispose();
+    for (final c in _credCtrls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  TextEditingController _ctrlFor(String key) =>
+      _credCtrls.putIfAbsent(key, TextEditingController.new);
+
+  Future<void> _save() async {
+    if (_saving) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    setState(() => _saving = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final fields = _credentialFields[_kind] ?? const [];
+    final labelText = _label.text.trim();
+    final kind = _kind;
+    final mode = _mode;
+
+    try {
+      final id = 'conn-${DateTime.now().millisecondsSinceEpoch}';
+      await ref.read(connectionsProvider.notifier).add(
+            Connection(
+              id: id,
+              kind: kind,
+              label: labelText,
+              status: ConnectionStatus.unknown,
+              credentialMode: mode,
+            ),
+          );
+
+      if (fields.isNotEmpty) {
+        final creds = <String, String>{
+          for (final (key, _, _) in fields)
+            key: _credCtrls[key]?.text.trim() ?? '',
+        };
+        final key = ref.read(credentialKeyProvider);
+        if (key == null) {
+          throw StateError(
+            'Credential key missing. Unlock with your PIN and try again.',
+          );
+        }
+        final ct = await E2eCrypto.production().encrypt(jsonEncode(creds), key);
+        final blob = base64Encode(utf8.encode(jsonEncode(ct.toEncoded())));
+        await ref.read(connectionsProvider.notifier).setCredentials(id, blob);
+      }
+
+      if (!mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Saved ${kind.name} connection "$labelText". '
+            'Refresh the dashboard to sync.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      messenger.showSnackBar(SnackBar(content: Text('Failed to save: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fields = _credentialFields[_kind] ?? const [];
+    return AlertDialog(
+      title: const Text('Add connection'),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<ConnectionKind>(
+                  key: const Key('connection_kind_picker'),
+                  initialValue: _kind,
+                  items: ConnectionKind.values
+                      .where((k) => k != ConnectionKind.manual)
+                      .map(
+                        (k) => DropdownMenuItem(
+                          value: k,
+                          child: Text(k.name),
+                        ),
+                      )
+                      .toList(growable: false),
+                  onChanged: _saving
+                      ? null
+                      : (value) {
+                          if (value != null) setState(() => _kind = value);
+                        },
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  key: const Key('connection_label_input'),
+                  controller: _label,
+                  enabled: !_saving,
+                  decoration: const InputDecoration(labelText: 'Display label'),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Label is required';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<CredentialMode>(
+                  initialValue: _mode,
+                  items: const [
+                    DropdownMenuItem(
+                      value: CredentialMode.e2e,
+                      child: Text('E2E'),
+                    ),
+                    DropdownMenuItem(
+                      value: CredentialMode.serverKey,
+                      child: Text('Server key'),
+                    ),
+                  ],
+                  onChanged: _saving
+                      ? null
+                      : (value) {
+                          if (value != null) setState(() => _mode = value);
+                        },
+                ),
+                if (fields.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'Credentials',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Encrypted on this device with your PIN before leaving '
+                    'the app.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  ...fields.map((f) {
+                    final (key, lbl, obscure) = f;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: TextFormField(
+                        key: Key('cred_field_$key'),
+                        controller: _ctrlFor(key),
+                        obscureText: obscure,
+                        enabled: !_saving,
+                        decoration: InputDecoration(labelText: lbl),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return '$lbl is required';
+                          }
+                          return null;
+                        },
+                      ),
+                    );
+                  }),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const Key('connection_save_button'),
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Save'),
+        ),
+      ],
     );
   }
 }
