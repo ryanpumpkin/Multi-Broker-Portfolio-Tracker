@@ -365,12 +365,31 @@ class FirestoreConnectionVaultStore:
     async def list_for_user(self, *, user_id: str) -> list[ConnectionCredentialRecord]:
         client = self._client()
         if client is None:
+            import logging
+            logging.getLogger("mbp.vault").warning(
+                "list_for_user: Firestore client is None — falling back to in-memory store",
+            )
             return await self._fallback.list_for_user(user_id=user_id)
 
         try:
             col = self._connections_collection(client, user_id=user_id)
             snap = await _run_blocking(col.get)
-            docs = list(getattr(snap, "docs", []) or [])
+            # Modern google-cloud-firestore returns a `QueryResultsList`
+            # from `CollectionReference.get()` — a list subclass whose
+            # iteration yields the documents directly. Older
+            # `QuerySnapshot` shape exposes documents via `.docs`. Try the
+            # iterable shape first, then fall back to `.docs` for safety.
+            docs: list[Any]
+            try:
+                docs = list(snap)
+            except TypeError:
+                docs = list(getattr(snap, "docs", []) or [])
+            import logging
+            logging.getLogger("mbp.vault").info(
+                "list_for_user uid=%s firestore_docs=%d",
+                user_id,
+                len(docs),
+            )
             out: list[ConnectionCredentialRecord] = []
             for doc in docs:
                 payload = _safe_to_dict(doc)
@@ -387,7 +406,15 @@ class FirestoreConnectionVaultStore:
                     )
                 )
             return out
-        except Exception:
+        except Exception as exc:
+            import logging
+            import traceback
+            logging.getLogger("mbp.vault").error(
+                "list_for_user uid=%s firestore_read_failed: %s\n%s",
+                user_id,
+                exc,
+                traceback.format_exc(),
+            )
             return await self._fallback.list_for_user(user_id=user_id)
 
     async def delete(self, *, user_id: str, connection_id: str) -> ConnectionCredentialRecord | None:

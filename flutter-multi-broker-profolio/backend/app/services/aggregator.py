@@ -117,6 +117,19 @@ class PortfolioAggregator:
         """Get a unified portfolio snapshot for one user."""
         base = base_currency.upper()
         connections = await self._enabled_connections(user_id)
+        # Diagnostic trace for the dashboard-refresh flow. Remove once the
+        # end-to-end path is verified.
+        import logging
+        logging.getLogger("mbp.aggregator").info(
+            "get_snapshot user_id=%s connections_found=%d kinds=%s wrapped_keys=%s",
+            user_id,
+            len(connections),
+            [c.source for c in connections],
+            list(credential_context.wrapped_tokens_by_connection.keys())
+            if credential_context is not None
+            and credential_context.wrapped_tokens_by_connection
+            else [],
+        )
 
         tasks = [
             self._collect_source_snapshot(user_id, conn, credential_context=credential_context)
