@@ -127,11 +127,23 @@ class ConnectionsScreen extends ConsumerWidget {
     // If app-lock isn't set up yet, nudge them to Settings first.
     final lock = await ref.read(appLockProvider.future);
     final hasPin = lock.hasPin;
-    final hasKey = ref.read(credentialKeyProvider) != null;
+    var hasKey = ref.read(credentialKeyProvider) != null;
     if (!context.mounted) return;
-    if (!hasPin || !hasKey) {
-      await _showPinRequiredDialog(context, hasPin: hasPin);
+
+    if (!hasPin) {
+      // No PIN set yet → nudge to Settings.
+      await _showPinRequiredDialog(context, hasPin: false);
       return;
+    }
+
+    if (!hasKey) {
+      // PIN exists but the in-memory key was wiped (lock / restart). Prompt
+      // for the PIN inline; if the user successfully unlocks, fall through
+      // to the Add Connection dialog.
+      await _showPinRequiredDialog(context, hasPin: true);
+      if (!context.mounted) return;
+      hasKey = ref.read(credentialKeyProvider) != null;
+      if (!hasKey) return; // user cancelled or PIN was wrong
     }
 
     await showDialog<void>(

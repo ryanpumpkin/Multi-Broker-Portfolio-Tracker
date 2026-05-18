@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../domain/domain.dart';
 import '../../../router/app_router.dart';
 import '../../../state/state.dart';
 import '../../widgets/widgets.dart';
@@ -31,7 +32,7 @@ class DashboardScreen extends ConsumerWidget {
               : const Icon(Icons.refresh),
           onPressed: portfolio.isLoading
               ? null
-              : () => ref.read(portfolioProvider.notifier).refresh(),
+              : () => _refreshWithPinGate(context, ref),
         ),
       ],
       body: RefreshIndicator(
@@ -120,6 +121,42 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
+  /// Refresh the portfolio, but if there are active E2E connections and no
+  /// credential key cached, prompt the user for their PIN first. Otherwise
+  /// the request fires without wrapped-creds and the backend returns
+  /// `source_health: down — missing wrapped credentials`.
+  Future<void> _refreshWithPinGate(BuildContext context, WidgetRef ref) async {
+    final hasKey = ref.read(credentialKeyProvider) != null;
+    final connectionsState = ref.read(connectionsProvider).valueOrNull;
+    final hasE2eConnections = connectionsState?.connections.any(
+          (c) => c.credentialMode == CredentialMode.e2e &&
+              c.status != ConnectionStatus.disabled,
+        ) ??
+        false;
+
+    if (!hasKey && hasE2eConnections) {
+      final lock = await ref.read(appLockProvider.future);
+      if (!context.mounted) return;
+      if (!lock.hasPin) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Set up a PIN in Settings → App Lock to sync E2E connections.',
+            ),
+          ),
+        );
+      } else {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => const _DashboardPinDialog(),
+        );
+      }
+    }
+
+    if (!context.mounted) return;
+    await ref.read(portfolioProvider.notifier).refresh();
+  }
+
   Map<String, double> _toPercentages(Map<String, double> map) {
     if (map.isEmpty) {
       return const {'N/A': 100};
@@ -129,5 +166,121 @@ class DashboardScreen extends ConsumerWidget {
       return map.map((k, v) => MapEntry(k, 0));
     }
     return map.map((key, value) => MapEntry(key, 100 * value / total));
+  }
+}
+
+class _DashboardPinDialog extends ConsumerStatefulWidget {
+  const _DashboardPinDialog();
+
+  @override
+  ConsumerState<_DashboardPinDialog> createState() =>
+      _DashboardPinDialogState();
+}
+
+class _DashboardPinDialogState extends ConsumerState<_DashboardPinDialog> {
+  final _ctrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final store = ref.read(appLockStoreProvider);
+      final hasher = ref.read(appLockPinHasherProvider);
+      final storedHash = await store.readPinHash();
+      if (storedHash == null) {
+        throw StateError('No PIN configured.');
+      }
+      final attemptHash = await hasher.hash(_ctrl.text);
+      if (attemptHash != storedHash) {
+        if (!mounted) return;
+        setState(() {
+          _saving = false;
+          _error = 'Wrong PIN.';
+        });
+        return;
+      }
+      await ref
+          .read(credentialKeyProvider.notifier)
+          .deriveAndCache(_ctrl.text);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Unlock to sync'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Enter your PIN so the dashboard can sync your E2E broker '
+              'connections.',
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const Key('dashboard_pin_input'),
+              controller: _ctrl,
+              autofocus: true,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'PIN'),
+              onFieldSubmitted: (_) => _submit(),
+              validator: (v) {
+                if (v == null || v.length < 4) return 'PIN is required';
+                return null;
+              },
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Skip'),
+        ),
+        FilledButton(
+          key: const Key('dashboard_pin_submit'),
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Unlock'),
+        ),
+      ],
+    );
   }
 }
