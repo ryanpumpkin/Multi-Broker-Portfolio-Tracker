@@ -128,11 +128,32 @@ class SettingsScreen extends ConsumerWidget {
                   title: const Text('Debug logs'),
                   onTap: () => context.push(AppRoutes.debugLogViewer),
                 ),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Sign out'),
-                onTap: () async {
-                  await ref.read(authProvider.notifier).signOut();
+              Consumer(
+                builder: (context, ref, _) {
+                  final user = ref.watch(authProvider).valueOrNull;
+                  // Anonymous users have no email — the FirebaseAuthAdapter
+                  // maps `null` → `''` when wrapping the Firebase user.
+                  final isAnonymous = (user?.email ?? '').isEmpty;
+                  if (isAnonymous) {
+                    return ListTile(
+                      key: const Key('settings_sign_up_tile'),
+                      leading: const Icon(Icons.person_add_outlined),
+                      title: const Text('Create an account'),
+                      subtitle: const Text(
+                        'Required for connections to persist across app '
+                        'restarts. Currently signed in anonymously.',
+                      ),
+                      onTap: () => context.go(AppRoutes.signUp),
+                    );
+                  }
+                  return ListTile(
+                    leading: const Icon(Icons.logout),
+                    title: const Text('Sign out'),
+                    subtitle: Text(user?.email ?? ''),
+                    onTap: () async {
+                      await ref.read(authProvider.notifier).signOut();
+                    },
+                  );
                 },
               ),
             ],
