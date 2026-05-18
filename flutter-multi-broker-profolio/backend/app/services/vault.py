@@ -287,6 +287,8 @@ class ConnectionVaultStore(Protocol):
 
     async def get(self, *, user_id: str, connection_id: str) -> ConnectionCredentialRecord | None: ...
 
+    async def list_for_user(self, *, user_id: str) -> list[ConnectionCredentialRecord]: ...
+
     async def delete(self, *, user_id: str, connection_id: str) -> ConnectionCredentialRecord | None: ...
 
 
@@ -303,6 +305,9 @@ class InMemoryConnectionVaultStore:
     async def get(self, *, user_id: str, connection_id: str) -> ConnectionCredentialRecord | None:
         return self._rows.get((user_id, connection_id))
 
+    async def list_for_user(self, *, user_id: str) -> list[ConnectionCredentialRecord]:
+        return [record for (uid, _), record in self._rows.items() if uid == user_id]
+
     async def delete(self, *, user_id: str, connection_id: str) -> ConnectionCredentialRecord | None:
         return self._rows.pop((user_id, connection_id), None)
 
@@ -318,6 +323,10 @@ class FirestoreConnectionVaultStore:
         raise NotImplementedError(msg)
 
     async def get(self, *, user_id: str, connection_id: str) -> ConnectionCredentialRecord | None:
+        msg = "FirestoreConnectionVaultStore is not wired yet"
+        raise NotImplementedError(msg)
+
+    async def list_for_user(self, *, user_id: str) -> list[ConnectionCredentialRecord]:
         msg = "FirestoreConnectionVaultStore is not wired yet"
         raise NotImplementedError(msg)
 

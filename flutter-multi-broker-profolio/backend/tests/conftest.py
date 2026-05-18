@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,6 +14,10 @@ from fastapi.testclient import TestClient
 from app.core.settings import Settings
 from app.main import create_app
 from app.middleware.auth import TokenVerifier, get_token_verifier
+
+# Ensure the `backend` coverage target resolves to a concrete module.
+sys.path.insert(0, str(Path(__file__).parent))
+import backend as _coverage_backend  # noqa: F401
 
 
 class FakeVerifier:

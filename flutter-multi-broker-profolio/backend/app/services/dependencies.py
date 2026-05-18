@@ -7,7 +7,13 @@ from functools import lru_cache
 from app.adapters.base import SourceAdapter
 from app.core.settings import Settings, get_settings
 from app.models.domain import Connection
-from app.services.aggregator import InMemoryConnectionRepository, PortfolioAggregator
+from app.services.adapter_factory import AdapterFactory
+from app.services.aggregator import ConnectionRepository, PortfolioAggregator
+from app.services.connection_status import (
+    FirestoreConnectionStatusWriter,
+    InMemoryConnectionStatusPublisher,
+    listener_from_writer,
+)
 from app.services.fx import (
     ExchangerateHostProvider,
     FxProvider,
@@ -18,6 +24,7 @@ from app.services.fx import (
 from app.services.quote_hub import QuoteHub, QuoteSourceRegistry
 from app.services.vault import (
     ConnectionVaultStore,
+    CredentialMode,
     CredentialVaultService,
     InMemoryConnectionVaultStore,
     KmsProvider,
@@ -38,6 +45,28 @@ class StaticAdapterRegistry(QuoteSourceRegistry):
         return self._adapters.get(source.lower())
 
 
+class VaultBackedConnectionRepository(ConnectionRepository):
+    """Maps vault connection records into aggregator Connection models."""
+
+    def __init__(self, store: ConnectionVaultStore) -> None:
+        self._store = store
+
+    async def list_connections(self, user_id: str) -> list[Connection]:
+        rows = await self._store.list_for_user(user_id=user_id)
+        out: list[Connection] = []
+        for row in rows:
+            out.append(
+                Connection(
+                    source=row.source,
+                    connection_id=row.connection_id,
+                    display_name=row.display_name,
+                    server_key_mode=row.credential_mode is CredentialMode.SERVER_KEY,
+                    enabled=row.enabled,
+                )
+            )
+        return out
+
+
 @lru_cache(maxsize=1)
 def get_adapter_registry() -> StaticAdapterRegistry:
     # Stub: backend-vault / backend-adapters wiring will inject real per-user adapters.
@@ -45,9 +74,8 @@ def get_adapter_registry() -> StaticAdapterRegistry:
 
 
 @lru_cache(maxsize=1)
-def get_connection_repository() -> InMemoryConnectionRepository:
-    # Stub: backend-vault will replace this with Firestore-backed connection retrieval.
-    return InMemoryConnectionRepository()
+def get_connection_repository() -> ConnectionRepository:
+    return VaultBackedConnectionRepository(get_connection_vault_store())
 
 
 @lru_cache(maxsize=1)
@@ -72,6 +100,9 @@ def get_portfolio_aggregator() -> PortfolioAggregator:
         connections=get_connection_repository(),
         adapters=get_adapter_registry(),
         fx=get_fx_service(),
+        adapter_factory=get_adapter_factory(),
+        vault_service=get_vault_service(),
+        status_publisher=get_connection_status_publisher(),
     )
 
 
@@ -100,10 +131,31 @@ def get_vault_service() -> CredentialVaultService:
     )
 
 
+@lru_cache(maxsize=1)
+def get_adapter_factory() -> AdapterFactory:
+    return AdapterFactory()
+
+
+@lru_cache(maxsize=1)
+def get_connection_status_writer() -> FirestoreConnectionStatusWriter:
+    return FirestoreConnectionStatusWriter()
+
+
+@lru_cache(maxsize=1)
+def get_connection_status_publisher() -> InMemoryConnectionStatusPublisher:
+    writer = get_connection_status_writer()
+    publisher = InMemoryConnectionStatusPublisher()
+    publisher.subscribe(listener_from_writer(writer))
+    return publisher
+
+
 __all__ = [
     "StaticAdapterRegistry",
     "get_adapter_registry",
     "get_connection_repository",
+    "get_adapter_factory",
+    "get_connection_status_publisher",
+    "get_connection_status_writer",
     "get_fx_service",
     "get_kms_provider",
     "get_portfolio_aggregator",

@@ -19,6 +19,11 @@ from app.models.domain import (
     Transaction,
 )
 from app.services.aggregator import InMemoryConnectionRepository, PortfolioAggregator
+from app.services.connection_status import (
+    CapturingConnectionStatusWriter,
+    InMemoryConnectionStatusPublisher,
+    listener_from_writer,
+)
 from app.services.dependencies import StaticAdapterRegistry
 
 
@@ -123,3 +128,33 @@ async def test_snapshot_surfaces_partial_failure_without_crashing() -> None:
     assert health["good"].status is SourceHealthStatus.OK
     assert health["bad"].status is SourceHealthStatus.DOWN
     assert health["bad"].message is not None
+
+
+@pytest.mark.asyncio
+async def test_positions_publish_connection_status_events() -> None:
+    repository = InMemoryConnectionRepository(
+        [
+            Connection(source="good", connection_id="c-good", display_name="good"),
+            Connection(source="bad", connection_id="c-bad", display_name="bad"),
+        ]
+    )
+    registry = StaticAdapterRegistry({"good": _GoodAdapter(), "bad": _FailingAdapter()})
+    writer = CapturingConnectionStatusWriter()
+    publisher = InMemoryConnectionStatusPublisher([listener_from_writer(writer)])
+    aggregator = PortfolioAggregator(
+        connections=repository,
+        adapters=registry,
+        fx=_StaticFx(),
+        status_publisher=publisher,
+    )
+
+    result = await aggregator.get_positions("user-1")
+
+    assert len(result.items) == 1
+    writes = {(uid, event.connection_id): event for uid, event in writer.writes}
+    ok = writes[("user-1", "c-good")]
+    err = writes[("user-1", "c-bad")]
+    assert ok.status.value == "ok"
+    assert ok.error_message is None
+    assert err.status.value == "error"
+    assert err.error_message is not None and "positions unavailable" in err.error_message

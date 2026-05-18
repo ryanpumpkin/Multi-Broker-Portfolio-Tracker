@@ -37,21 +37,21 @@ independent and can be worked in parallel.
 
 ### Backend — shared
 
-- [ ] Add `X-MBP-Creds` header parsing middleware that extracts the
+- [x] Add `X-MBP-Creds` header parsing middleware that extracts the
   wrapped E2E token (base64 of the JSON envelope produced by
   `E2eCrypto.wrapForBackend`) into the request context. Skip if header
   absent (server-key mode falls through to vault).
-- [ ] Implement `unwrapFromBackend` in Python that matches the Dart
+- [x] Implement `unwrapFromBackend` in Python that matches the Dart
   implementation byte-for-byte (same AES-GCM nonce/MAC layout, same
   JSON envelope `{v, expiresAt, ct: {nonce, cipherBytes, mac}}`,
   reject expired). Unit tests round-trip against fixtures generated
   by the Dart code.
-- [ ] Add `app/services/adapter_factory.py` that resolves
+- [x] Add `app/services/adapter_factory.py` that resolves
   `(connection_kind, plaintext_creds) → SourceAdapter` for the request.
-- [ ] After every successful adapter call in the aggregator, publish a
+- [x] After every successful adapter call in the aggregator, publish a
   `(connectionId, status, lastSyncAt, errorMessage?)` event. Listener
   writes to Firestore via the existing `firestore` admin client.
-- [ ] Update `/v1/portfolio`, `/v1/positions`, `/v1/transactions`,
+- [x] Update `/v1/portfolio`, `/v1/positions`, `/v1/transactions`,
   `/v1/balances` to accept the wrapped-creds header and pass plaintext
   creds into the aggregator → adapter_factory → adapter.
 

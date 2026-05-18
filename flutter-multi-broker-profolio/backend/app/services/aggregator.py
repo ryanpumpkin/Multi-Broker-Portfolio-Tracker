@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol, TypeVar, cast
 
 from app.adapters.base import SourceAdapter
+from app.core.e2e_backend import WrappedCredentialError, unwrap_from_backend
 from app.models.domain import (
     CashBalance,
     Connection,
@@ -22,9 +23,29 @@ from app.models.domain import (
     SourceHealthStatus,
     Transaction,
 )
+from app.services.adapter_factory import AdapterFactory
+from app.services.connection_status import (
+    ConnectionStatusEventPublisher,
+    ConnectionSyncStatus,
+    ConnectionSyncStatusEvent,
+    NoopConnectionStatusPublisher,
+)
 from app.services.fx import FxService
+from app.services.vault import CredentialVaultService
 
 T = TypeVar("T")
+
+
+@dataclass(slots=True, frozen=True)
+class AggregationCredentialContext:
+    """Request-scoped credential data needed for adapter construction."""
+
+    wrapped_tokens_by_connection: dict[str, str] = field(default_factory=dict)
+    shared_wrapped_token: str | None = None
+    unwrap_key: bytes | None = None
+
+    def token_for(self, connection_id: str) -> str | None:
+        return self.wrapped_tokens_by_connection.get(connection_id) or self.shared_wrapped_token
 
 
 class ConnectionRepository(Protocol):
@@ -34,7 +55,7 @@ class ConnectionRepository(Protocol):
 
 
 class AdapterRegistry(Protocol):
-    """Maps a user connection to the adapter instance handling it."""
+    """Legacy adapter lookup by connection source."""
 
     def for_connection(self, connection: Connection) -> SourceAdapter | None: ...
 
@@ -73,19 +94,34 @@ class PortfolioAggregator:
         adapters: AdapterRegistry,
         fx: FxService,
         ttl_seconds: float = 10.0,
+        adapter_factory: AdapterFactory | None = None,
+        vault_service: CredentialVaultService | None = None,
+        status_publisher: ConnectionStatusEventPublisher | None = None,
     ) -> None:
         self._connections = connections
         self._adapters = adapters
         self._fx = fx
         self._ttl_seconds = ttl_seconds
+        self._adapter_factory = adapter_factory
+        self._vault_service = vault_service
+        self._status_publisher = status_publisher or NoopConnectionStatusPublisher()
         self._cache: dict[tuple[str, str, str], _TtlEntry] = {}
 
-    async def get_snapshot(self, user_id: str, *, base_currency: str = "USD") -> PortfolioSnapshot:
+    async def get_snapshot(
+        self,
+        user_id: str,
+        *,
+        base_currency: str = "USD",
+        credential_context: AggregationCredentialContext | None = None,
+    ) -> PortfolioSnapshot:
         """Get a unified portfolio snapshot for one user."""
         base = base_currency.upper()
         connections = await self._enabled_connections(user_id)
 
-        tasks = [self._collect_source_snapshot(user_id, conn) for conn in connections]
+        tasks = [
+            self._collect_source_snapshot(user_id, conn, credential_context=credential_context)
+            for conn in connections
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         positions: list[Position] = []
@@ -131,9 +167,17 @@ class PortfolioAggregator:
         user_id: str,
         *,
         source: str | None = None,
+        credential_context: AggregationCredentialContext | None = None,
     ) -> PartialResult[Position]:
         connections = await self._filtered_connections(user_id, source=source)
-        tasks = [self._list_positions_for_connection(user_id, conn) for conn in connections]
+        tasks = [
+            self._list_positions_for_connection(
+                user_id,
+                conn,
+                credential_context=credential_context,
+            )
+            for conn in connections
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         items: list[Position] = []
         health: list[SourceHealth] = []
@@ -152,9 +196,17 @@ class PortfolioAggregator:
         user_id: str,
         *,
         source: str | None = None,
+        credential_context: AggregationCredentialContext | None = None,
     ) -> PartialResult[CashBalance]:
         connections = await self._filtered_connections(user_id, source=source)
-        tasks = [self._list_balances_for_connection(user_id, conn) for conn in connections]
+        tasks = [
+            self._list_balances_for_connection(
+                user_id,
+                conn,
+                credential_context=credential_context,
+            )
+            for conn in connections
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         items: list[CashBalance] = []
         health: list[SourceHealth] = []
@@ -175,9 +227,19 @@ class PortfolioAggregator:
         source: str | None = None,
         since: str | None = None,
         limit: int | None = None,
+        credential_context: AggregationCredentialContext | None = None,
     ) -> PartialResult[Transaction]:
         connections = await self._filtered_connections(user_id, source=source)
-        tasks = [self._list_transactions_for_connection(conn, since=since, limit=limit) for conn in connections]
+        tasks = [
+            self._list_transactions_for_connection(
+                user_id,
+                conn,
+                since=since,
+                limit=limit,
+                credential_context=credential_context,
+            )
+            for conn in connections
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         items: list[Transaction] = []
@@ -196,21 +258,23 @@ class PortfolioAggregator:
             items = items[:limit]
         return PartialResult(items=items, source_health=health)
 
-    async def _collect_source_snapshot(self, user_id: str, conn: Connection) -> _SourceSlice:
-        adapter = self._adapters.for_connection(conn)
-        if adapter is None:
-            return _SourceSlice(
-                source_health=SourceHealth(
-                    source=conn.source,
-                    status=SourceHealthStatus.DOWN,
-                    message=f"No adapter configured for source '{conn.source}'",
-                ),
-                positions=[],
-                balances=[],
-            )
-
-        pos_task = self._list_positions_for_connection(user_id, conn)
-        bal_task = self._list_balances_for_connection(user_id, conn)
+    async def _collect_source_snapshot(
+        self,
+        user_id: str,
+        conn: Connection,
+        *,
+        credential_context: AggregationCredentialContext | None,
+    ) -> _SourceSlice:
+        pos_task = self._list_positions_for_connection(
+            user_id,
+            conn,
+            credential_context=credential_context,
+        )
+        bal_task = self._list_balances_for_connection(
+            user_id,
+            conn,
+            credential_context=credential_context,
+        )
         pos_result, bal_result = await asyncio.gather(pos_task, bal_task, return_exceptions=True)
 
         positions: list[Position] = []
@@ -248,32 +312,182 @@ class PortfolioAggregator:
             balances=balances,
         )
 
-    async def _list_positions_for_connection(self, user_id: str, conn: Connection) -> list[Position]:
-        adapter = self._require_adapter(conn)
+    async def _list_positions_for_connection(
+        self,
+        user_id: str,
+        conn: Connection,
+        *,
+        credential_context: AggregationCredentialContext | None,
+    ) -> list[Position]:
         key = (user_id, conn.connection_id, "positions")
-        return await self._cached(key, adapter.list_positions)
 
-    async def _list_balances_for_connection(self, user_id: str, conn: Connection) -> list[CashBalance]:
-        adapter = self._require_adapter(conn)
+        async def _load() -> list[Position]:
+            adapter = await self._resolve_adapter(
+                user_id=user_id,
+                conn=conn,
+                purpose="list_positions",
+                credential_context=credential_context,
+            )
+            try:
+                rows = await adapter.list_positions()
+                await self._emit_status(
+                    user_id=user_id,
+                    connection_id=conn.connection_id,
+                    status=ConnectionSyncStatus.OK,
+                )
+                return rows
+            except Exception as exc:  # noqa: BLE001 - propagate while recording status
+                await self._emit_status(
+                    user_id=user_id,
+                    connection_id=conn.connection_id,
+                    status=ConnectionSyncStatus.ERROR,
+                    error_message=str(exc),
+                )
+                raise
+
+        return await self._cached(key, _load)
+
+    async def _list_balances_for_connection(
+        self,
+        user_id: str,
+        conn: Connection,
+        *,
+        credential_context: AggregationCredentialContext | None,
+    ) -> list[CashBalance]:
         key = (user_id, conn.connection_id, "balances")
-        return await self._cached(key, adapter.list_balances)
+
+        async def _load() -> list[CashBalance]:
+            adapter = await self._resolve_adapter(
+                user_id=user_id,
+                conn=conn,
+                purpose="list_balances",
+                credential_context=credential_context,
+            )
+            try:
+                rows = await adapter.list_balances()
+                await self._emit_status(
+                    user_id=user_id,
+                    connection_id=conn.connection_id,
+                    status=ConnectionSyncStatus.OK,
+                )
+                return rows
+            except Exception as exc:  # noqa: BLE001 - propagate while recording status
+                await self._emit_status(
+                    user_id=user_id,
+                    connection_id=conn.connection_id,
+                    status=ConnectionSyncStatus.ERROR,
+                    error_message=str(exc),
+                )
+                raise
+
+        return await self._cached(key, _load)
 
     async def _list_transactions_for_connection(
         self,
+        user_id: str,
         conn: Connection,
         *,
         since: str | None,
         limit: int | None,
+        credential_context: AggregationCredentialContext | None,
     ) -> list[Transaction]:
-        adapter = self._require_adapter(conn)
-        return await adapter.list_transactions(since=since, limit=limit)
+        adapter = await self._resolve_adapter(
+            user_id=user_id,
+            conn=conn,
+            purpose="list_transactions",
+            credential_context=credential_context,
+        )
+        try:
+            rows = await adapter.list_transactions(since=since, limit=limit)
+            await self._emit_status(
+                user_id=user_id,
+                connection_id=conn.connection_id,
+                status=ConnectionSyncStatus.OK,
+            )
+            return rows
+        except Exception as exc:  # noqa: BLE001
+            await self._emit_status(
+                user_id=user_id,
+                connection_id=conn.connection_id,
+                status=ConnectionSyncStatus.ERROR,
+                error_message=str(exc),
+            )
+            raise
 
-    def _require_adapter(self, conn: Connection) -> SourceAdapter:
+    async def _resolve_adapter(
+        self,
+        *,
+        user_id: str,
+        conn: Connection,
+        purpose: str,
+        credential_context: AggregationCredentialContext | None,
+    ) -> SourceAdapter:
+        if self._adapter_factory is not None and self._vault_service is not None:
+            plaintext = await self._resolve_plaintext_credentials(
+                user_id=user_id,
+                conn=conn,
+                purpose=purpose,
+                credential_context=credential_context,
+            )
+            return self._adapter_factory.for_connection(
+                connection_kind=conn.source,
+                plaintext_creds=plaintext,
+            )
+
         adapter = self._adapters.for_connection(conn)
         if adapter is None:
             msg = f"No adapter configured for source '{conn.source}'"
             raise LookupError(msg)
         return adapter
+
+    async def _resolve_plaintext_credentials(
+        self,
+        *,
+        user_id: str,
+        conn: Connection,
+        purpose: str,
+        credential_context: AggregationCredentialContext | None,
+    ) -> str:
+        vault = self._vault_service
+        if vault is None:
+            msg = "vault service is required for credential resolution"
+            raise LookupError(msg)
+
+        if conn.server_key_mode:
+            return await vault.use_credential(
+                user_id=user_id,
+                connection_id=conn.connection_id,
+                purpose=purpose,
+                client_token=None,
+                fn=lambda plaintext: plaintext,
+            )
+
+        token = credential_context.token_for(conn.connection_id) if credential_context else None
+        if token is None:
+            msg = "missing wrapped credentials for e2e connection"
+            raise WrappedCredentialError(msg)
+        if credential_context is None or credential_context.unwrap_key is None:
+            msg = "missing unwrap key for wrapped credentials"
+            raise WrappedCredentialError(msg)
+        return unwrap_from_backend(token, key=credential_context.unwrap_key)
+
+    async def _emit_status(
+        self,
+        *,
+        user_id: str,
+        connection_id: str,
+        status: ConnectionSyncStatus,
+        error_message: str | None = None,
+    ) -> None:
+        await self._status_publisher.publish(
+            user_id=user_id,
+            event=ConnectionSyncStatusEvent(
+                connection_id=connection_id,
+                status=status,
+                last_sync_at=datetime.now(UTC),
+                error_message=error_message,
+            ),
+        )
 
     async def _enabled_connections(self, user_id: str) -> list[Connection]:
         rows = await self._connections.list_connections(user_id)
@@ -377,6 +591,7 @@ class PortfolioAggregator:
 
 __all__ = [
     "AdapterRegistry",
+    "AggregationCredentialContext",
     "ConnectionRepository",
     "InMemoryConnectionRepository",
     "PortfolioAggregator",
