@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from app.api.connections import router as connections_router
 from app.api.fx import router as fx_router
 from app.api.portfolio import router as portfolio_router
 from app.api.quotes import router as quotes_router
@@ -23,3 +24,4 @@ def whoami(user: Annotated[AuthenticatedUser, Depends(current_user)]) -> dict[st
 api_router.include_router(portfolio_router)
 api_router.include_router(quotes_router)
 api_router.include_router(fx_router)
+api_router.include_router(connections_router)

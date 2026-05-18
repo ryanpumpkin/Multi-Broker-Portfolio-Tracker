@@ -16,6 +16,13 @@ from app.services.fx import (
     OpenExchangeRatesProvider,
 )
 from app.services.quote_hub import QuoteHub, QuoteSourceRegistry
+from app.services.vault import (
+    ConnectionVaultStore,
+    CredentialVaultService,
+    InMemoryConnectionVaultStore,
+    KmsProvider,
+    build_kms_provider,
+)
 
 
 class StaticAdapterRegistry(QuoteSourceRegistry):
@@ -73,11 +80,34 @@ def get_quote_hub() -> QuoteHub:
     return QuoteHub(get_adapter_registry())
 
 
+@lru_cache(maxsize=1)
+def get_kms_provider(settings: Settings | None = None) -> KmsProvider:
+    cfg = settings or get_settings()
+    return build_kms_provider(provider_name=cfg.kms_provider, key_id=cfg.kms_key_id)
+
+
+@lru_cache(maxsize=1)
+def get_connection_vault_store() -> ConnectionVaultStore:
+    # Stub: backend-vault interface is in place; Firestore wiring comes later.
+    return InMemoryConnectionVaultStore()
+
+
+@lru_cache(maxsize=1)
+def get_vault_service() -> CredentialVaultService:
+    return CredentialVaultService(
+        store=get_connection_vault_store(),
+        kms=get_kms_provider(),
+    )
+
+
 __all__ = [
     "StaticAdapterRegistry",
     "get_adapter_registry",
     "get_connection_repository",
     "get_fx_service",
+    "get_kms_provider",
     "get_portfolio_aggregator",
     "get_quote_hub",
+    "get_connection_vault_store",
+    "get_vault_service",
 ]
