@@ -89,8 +89,12 @@ class WrappedCredentialsBuilder {
     for (final connection in active) {
       try {
         tokens[connection.id] = await buildForConnection(connection.id);
-      } catch (e) {
-        errors[connection.id] = '$e';
+      } on StateError {
+        errors[connection.id] = 'Unable to load encrypted credentials';
+      } on FormatException {
+        errors[connection.id] = 'Stored credentials are malformed';
+      } catch (_) {
+        errors[connection.id] = 'Unable to prepare credentials';
       }
     }
 

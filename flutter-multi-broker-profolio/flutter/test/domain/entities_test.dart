@@ -38,7 +38,12 @@ void main() {
   });
 
   group('Transaction.cashImpact', () {
-    Transaction tx(TransactionType type, {double qty = 1, double price = 10, double fee = 0}) =>
+    Transaction tx(
+      TransactionType type, {
+      double qty = 1,
+      double price = 10,
+      double fee = 0,
+    }) =>
         Transaction(
           id: 't',
           sourceId: 's',
@@ -52,13 +57,22 @@ void main() {
         );
 
     test('buy is negative (qty*price + fee)', () {
-      expect(tx(TransactionType.buy, qty: 2, price: 10, fee: 1).cashImpact, -21);
+      expect(
+        tx(TransactionType.buy, qty: 2, price: 10, fee: 1).cashImpact,
+        -21,
+      );
     });
     test('sell is positive minus fee', () {
-      expect(tx(TransactionType.sell, qty: 2, price: 10, fee: 1).cashImpact, 19);
+      expect(
+        tx(TransactionType.sell, qty: 2, price: 10, fee: 1).cashImpact,
+        19,
+      );
     });
     test('dividend is positive minus fee', () {
-      expect(tx(TransactionType.dividend, qty: 1, price: 5, fee: 0).cashImpact, 5);
+      expect(
+        tx(TransactionType.dividend, qty: 1, price: 5, fee: 0).cashImpact,
+        5,
+      );
     });
     test('fee-only is -fee', () {
       expect(tx(TransactionType.fee, fee: 3).cashImpact, -3);
@@ -68,7 +82,10 @@ void main() {
       expect(tx(TransactionType.withdrawal, qty: 1, price: 50).cashImpact, -50);
     });
     test('cryptoTrade is negative', () {
-      expect(tx(TransactionType.cryptoTrade, qty: 1, price: 100, fee: 2).cashImpact, -102);
+      expect(
+        tx(TransactionType.cryptoTrade, qty: 1, price: 100, fee: 2).cashImpact,
+        -102,
+      );
     });
     test('copyWith / equality / toString', () {
       final t = tx(TransactionType.buy);
@@ -95,7 +112,10 @@ void main() {
         status: ConnectionStatus.ok,
         credentialMode: CredentialMode.e2e,
       );
-      expect(c.copyWith(status: ConnectionStatus.error).status, ConnectionStatus.error);
+      expect(
+        c.copyWith(status: ConnectionStatus.error).status,
+        ConnectionStatus.error,
+      );
       expect(c.copyWith(), equals(c));
       expect(c.hashCode, equals(c.copyWith().hashCode));
       expect(c.toString(), contains('Binance Main'));
@@ -174,6 +194,7 @@ void main() {
   group('PortfolioSnapshot', () {
     PortfolioSnapshot mk({
       List<Position>? pos,
+      List<SourceHealth>? health,
       Map<String, double>? src,
       Map<String, double>? cur,
       double base = 100,
@@ -183,6 +204,7 @@ void main() {
           baseCurrency: 'USD',
           positions: pos ?? const [],
           cashBalances: const [],
+          sourceHealth: health ?? const <SourceHealth>[],
           totalsBySource: src ?? const {'lb': 100},
           totalsByCurrency: cur ?? const {'USD': 100},
           totalBaseValue: base,
@@ -201,6 +223,23 @@ void main() {
       expect(a, isNot(equals(mk(src: {'lb': 99}))));
       expect(a, isNot(equals(mk(src: {'lb': 100, 'ibkr': 50}))));
       expect(a, isNot(equals(mk(cur: {'HKD': 100}))));
+      expect(
+        a,
+        isNot(
+          equals(
+            mk(
+              health: const <SourceHealth>[
+                SourceHealth(
+                  sourceId: 'lb',
+                  status: ConnectionStatus.error,
+                  code: 'timeout',
+                  message: 'timed out',
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
       final p = Position.computed(
         sourceId: 'lb',
         symbol: 'A',
@@ -217,6 +256,21 @@ void main() {
       final a = mk();
       expect(a.copyWith(), equals(a));
       expect(a.toString(), contains('USD'));
+    });
+  });
+
+  group('SourceHealth', () {
+    test('value equality / copyWith / toString', () {
+      const s = SourceHealth(
+        sourceId: 'lb',
+        status: ConnectionStatus.error,
+        code: 'credential_wrap_failed',
+        message: 'Unable to prepare credentials',
+      );
+      expect(s.copyWith(), equals(s));
+      expect(s.copyWith(status: ConnectionStatus.ok), isNot(equals(s)));
+      expect(s.hashCode, equals(s.copyWith().hashCode));
+      expect(s.toString(), contains('lb'));
     });
   });
 

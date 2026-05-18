@@ -1,5 +1,6 @@
 import 'cash_balance.dart';
 import 'position.dart';
+import 'source_health.dart';
 
 /// Aggregated portfolio at a point in time.
 class PortfolioSnapshot {
@@ -8,6 +9,7 @@ class PortfolioSnapshot {
     required this.baseCurrency,
     required this.positions,
     required this.cashBalances,
+    this.sourceHealth = const <SourceHealth>[],
     required this.totalsBySource,
     required this.totalsByCurrency,
     required this.totalBaseValue,
@@ -18,6 +20,7 @@ class PortfolioSnapshot {
   final String baseCurrency;
   final List<Position> positions;
   final List<CashBalance> cashBalances;
+  final List<SourceHealth> sourceHealth;
 
   /// Total market value per source, expressed in [baseCurrency].
   final Map<String, double> totalsBySource;
@@ -36,6 +39,7 @@ class PortfolioSnapshot {
     String? baseCurrency,
     List<Position>? positions,
     List<CashBalance>? cashBalances,
+    List<SourceHealth>? sourceHealth,
     Map<String, double>? totalsBySource,
     Map<String, double>? totalsByCurrency,
     double? totalBaseValue,
@@ -46,6 +50,7 @@ class PortfolioSnapshot {
       baseCurrency: baseCurrency ?? this.baseCurrency,
       positions: positions ?? this.positions,
       cashBalances: cashBalances ?? this.cashBalances,
+      sourceHealth: sourceHealth ?? this.sourceHealth,
       totalsBySource: totalsBySource ?? this.totalsBySource,
       totalsByCurrency: totalsByCurrency ?? this.totalsByCurrency,
       totalBaseValue: totalBaseValue ?? this.totalBaseValue,
@@ -65,6 +70,7 @@ class PortfolioSnapshot {
     if (totalUnrealizedPnlBase != other.totalUnrealizedPnlBase) return false;
     if (!_listEq(positions, other.positions)) return false;
     if (!_listEq(cashBalances, other.cashBalances)) return false;
+    if (!_listEq(sourceHealth, other.sourceHealth)) return false;
     if (!_mapEq(totalsBySource, other.totalsBySource)) return false;
     if (!_mapEq(totalsByCurrency, other.totalsByCurrency)) return false;
     return true;
@@ -76,6 +82,7 @@ class PortfolioSnapshot {
         baseCurrency,
         Object.hashAll(positions),
         Object.hashAll(cashBalances),
+        Object.hashAll(sourceHealth),
         Object.hashAllUnordered(totalsBySource.entries.map(_entryHash)),
         Object.hashAllUnordered(totalsByCurrency.entries.map(_entryHash)),
         totalBaseValue,
@@ -102,7 +109,7 @@ class PortfolioSnapshot {
   }
 
   @override
-  String toString() =>
-      'PortfolioSnapshot(asOf: $asOf, base: $baseCurrency, '
-      'totalBaseValue: $totalBaseValue, positions: ${positions.length})';
+  String toString() => 'PortfolioSnapshot(asOf: $asOf, base: $baseCurrency, '
+      'totalBaseValue: $totalBaseValue, positions: ${positions.length}, '
+      'sourceHealth: ${sourceHealth.length})';
 }

@@ -109,7 +109,65 @@ void main() {
 
       expect(result.tokensByConnection, isEmpty);
       expect(result.errorsByConnection.keys, <String>['c1']);
+      expect(
+        result.errorsByConnection['c1'],
+        'Credential key is not available',
+      );
       expect(result.keyBytes, isNull);
+    });
+
+    test('buildForConnections sanitizes missing credential blob error',
+        () async {
+      final builder = WrappedCredentialsBuilder(
+        firestore: InMemoryFirestoreClient(),
+        userId: 'u1',
+        readCredentialKey: () => key,
+        crypto: crypto,
+      );
+
+      final result = await builder.buildForConnections(const <Connection>[
+        Connection(
+          id: 'c-missing',
+          kind: ConnectionKind.longbridge,
+          label: 'LB',
+          status: ConnectionStatus.ok,
+          credentialMode: CredentialMode.e2e,
+        ),
+      ]);
+
+      expect(result.tokensByConnection, isEmpty);
+      expect(
+        result.errorsByConnection['c-missing'],
+        'Unable to load encrypted credentials',
+      );
+    });
+
+    test('buildForConnections sanitizes malformed credential blob error',
+        () async {
+      final firestore = InMemoryFirestoreClient();
+      await firestore.setEncryptedCredential('u1', 'c-malformed', 'not-b64');
+      final builder = WrappedCredentialsBuilder(
+        firestore: firestore,
+        userId: 'u1',
+        readCredentialKey: () => key,
+        crypto: crypto,
+      );
+
+      final result = await builder.buildForConnections(const <Connection>[
+        Connection(
+          id: 'c-malformed',
+          kind: ConnectionKind.longbridge,
+          label: 'LB',
+          status: ConnectionStatus.ok,
+          credentialMode: CredentialMode.e2e,
+        ),
+      ]);
+
+      expect(result.tokensByConnection, isEmpty);
+      expect(
+        result.errorsByConnection['c-malformed'],
+        'Stored credentials are malformed',
+      );
     });
   });
 }

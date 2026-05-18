@@ -72,6 +72,28 @@ void main() {
       expect(s.baseCurrency, 'USD');
       expect(s.positions, isEmpty);
       expect(s.cashBalances, isEmpty);
+      expect(s.sourceHealth, isEmpty);
+    });
+
+    test('snapshotFromJson maps source health from snake_case payload', () {
+      final s = Mappers.snapshotFromJson({
+        'asOf': '2025-01-01T00:00:00Z',
+        'baseCurrency': 'USD',
+        'totalBaseValue': 100,
+        'totalUnrealizedPnlBase': 10,
+        'source_health': const <Map<String, String>>[
+          <String, String>{
+            'source_id': 'lb',
+            'status': 'error',
+            'code': 'timeout',
+            'message': 'timed out',
+          },
+        ],
+      });
+      expect(s.sourceHealth, hasLength(1));
+      expect(s.sourceHealth.single.sourceId, 'lb');
+      expect(s.sourceHealth.single.status, ConnectionStatus.error);
+      expect(s.sourceHealth.single.code, 'timeout');
     });
 
     test('connection round-trip', () {

@@ -98,11 +98,18 @@ class Mappers {
         .whereType<Map<String, dynamic>>()
         .map(cashBalanceFromJson)
         .toList(growable: false);
+    final sourceHealth = ((j['sourceHealth'] as List?) ??
+            (j['source_health'] as List?) ??
+            const [])
+        .whereType<Map<String, dynamic>>()
+        .map(sourceHealthFromJson)
+        .toList(growable: false);
     return PortfolioSnapshot(
       asOf: DateTime.parse(j['asOf'] as String).toUtc(),
       baseCurrency: j['baseCurrency'] as String,
       positions: positions,
       cashBalances: balances,
+      sourceHealth: sourceHealth,
       totalsBySource: ((j['totalsBySource'] as Map?) ?? const {})
           .map((k, v) => MapEntry(k as String, _num(v))),
       totalsByCurrency: ((j['totalsByCurrency'] as Map?) ?? const {})
@@ -142,14 +149,27 @@ class Mappers {
         'credentialMode': c.credentialMode.name,
       };
 
+  // ---------------- SourceHealth -----------------------------------------
+
+  static SourceHealth sourceHealthFromJson(Map<String, dynamic> j) {
+    return SourceHealth(
+      sourceId: j['sourceId'] as String? ?? j['source_id'] as String? ?? '',
+      status: ConnectionStatus.values.firstWhere(
+        (s) => s.name == (j['status'] as String? ?? 'unknown'),
+        orElse: () => ConnectionStatus.unknown,
+      ),
+      code: j['code'] as String?,
+      message: j['message'] as String?,
+    );
+  }
+
   // ---------------- ManualHolding ----------------------------------------
 
   static ManualHolding manualFromJson(Map<String, dynamic> j) {
     return ManualHolding(
       id: j['id'] as String,
       label: j['label'] as String? ?? '',
-      assetClass:
-          assetClassFromString(j['assetClass'] as String? ?? 'other'),
+      assetClass: assetClassFromString(j['assetClass'] as String? ?? 'other'),
       quantity: _num(j['quantity']),
       valueCurrency: j['valueCurrency'] as String? ?? 'USD',
       valueAmount: _num(j['valueAmount']),

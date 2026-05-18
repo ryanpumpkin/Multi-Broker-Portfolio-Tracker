@@ -7,4 +7,5 @@ export 'manual_holding.dart';
 export 'portfolio_snapshot.dart';
 export 'position.dart';
 export 'price_quote.dart';
+export 'source_health.dart';
 export 'transaction.dart';

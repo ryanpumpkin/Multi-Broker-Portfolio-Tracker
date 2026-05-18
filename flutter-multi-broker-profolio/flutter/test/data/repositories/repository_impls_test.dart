@@ -329,6 +329,63 @@ void main() {
       await db.close();
     });
 
+    test('PortfolioRepositoryImpl surfaces wrapped credential build errors',
+        () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      final backend = _backendFromMock((_) async {
+        return http.Response(
+          jsonEncode({
+            'asOf': DateTime.utc(2026).toIso8601String(),
+            'baseCurrency': 'USD',
+            'positions': const <Map<String, dynamic>>[],
+            'cashBalances': const <Map<String, dynamic>>[],
+            'source_health': const <Map<String, String>>[
+              <String, String>{
+                'source_id': 'ibkr',
+                'status': 'ok',
+              },
+            ],
+            'totalsBySource': const <String, double>{},
+            'totalsByCurrency': const <String, double>{},
+            'totalBaseValue': 0,
+            'totalUnrealizedPnlBase': 0,
+          }),
+          200,
+        );
+      });
+      final repo = PortfolioRepositoryImpl(
+        db: db,
+        backend: backend,
+        connections: const _StaticConnectionsRepository(<Connection>[
+          Connection(
+            id: 'c1',
+            kind: ConnectionKind.longbridge,
+            label: 'LB',
+            status: ConnectionStatus.ok,
+            credentialMode: CredentialMode.e2e,
+          ),
+        ]),
+        wrappedCredentialsBuilder: _FixedWrappedCredentialsBuilder(
+          tokens: const <String, String>{},
+          errors: const <String, String>{
+            'c1': 'Unable to prepare credentials',
+          },
+        ),
+      );
+
+      final snapshot = await repo.getSnapshot(baseCurrency: 'USD');
+
+      expect(snapshot.sourceHealth, hasLength(2));
+      expect(snapshot.sourceHealth[0].sourceId, 'ibkr');
+      expect(snapshot.sourceHealth[0].status, ConnectionStatus.ok);
+      expect(snapshot.sourceHealth[1].sourceId, 'c1');
+      expect(snapshot.sourceHealth[1].status, ConnectionStatus.error);
+      expect(snapshot.sourceHealth[1].code, 'credential_wrap_failed');
+      expect(snapshot.sourceHealth[1].message, 'Unable to prepare credentials');
+      await repo.dispose();
+      await db.close();
+    });
+
     test('QuotesRepositoryImpl maps stream payloads and disposes source',
         () async {
       final fake = _FakeQuotesStream();
@@ -554,7 +611,8 @@ class _NoopWrappedCredentialsBuilder extends WrappedCredentialsBuilder {
 class _FixedWrappedCredentialsBuilder extends WrappedCredentialsBuilder {
   _FixedWrappedCredentialsBuilder({
     required this.tokens,
-    required this.keyBytes,
+    this.errors = const <String, String>{},
+    this.keyBytes = const <int>[],
   }) : super(
           firestore: InMemoryFirestoreClient(),
           userId: 'u1',
@@ -563,6 +621,7 @@ class _FixedWrappedCredentialsBuilder extends WrappedCredentialsBuilder {
         );
 
   final Map<String, String> tokens;
+  final Map<String, String> errors;
   final List<int> keyBytes;
 
   @override
@@ -571,7 +630,7 @@ class _FixedWrappedCredentialsBuilder extends WrappedCredentialsBuilder {
   ) async {
     return WrappedCredentialsBuildResult(
       tokensByConnection: tokens,
-      errorsByConnection: const <String, String>{},
+      errorsByConnection: errors,
       keyBytes: keyBytes,
     );
   }

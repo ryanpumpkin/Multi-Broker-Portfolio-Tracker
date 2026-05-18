@@ -62,6 +62,45 @@ void main() {
       );
     });
 
+    test(
+        'encodes wrapped credential headers for positions/transactions/balances',
+        () async {
+      final seen = <String, http.Request>{};
+      final c = MockClient((req) async {
+        seen[req.url.path] = req;
+        return http.Response('[]', 200);
+      });
+      final client = build(c);
+      const creds = <String, String>{'c1': 'token-1'};
+
+      await client.getPositions(
+        wrappedCredsByConnection: creds,
+        wrappedCredsKeyBytes: const <int>[9, 9],
+      );
+      await client.getTransactions(
+        wrappedCredsByConnection: creds,
+        wrappedCredsKeyBytes: const <int>[9, 9],
+      );
+      await client.getBalances(
+        wrappedCredsByConnection: creds,
+        wrappedCredsKeyBytes: const <int>[9, 9],
+      );
+
+      for (final path in <String>[
+        '/v1/positions',
+        '/v1/transactions',
+        '/v1/balances',
+      ]) {
+        final req = seen[path];
+        expect(req, isNotNull, reason: 'missing request for $path');
+        expect(req!.headers[BackendClient.mbpCredsHeader], isNotNull);
+        expect(
+          req.headers[BackendClient.mbpCredsKeyHeader],
+          base64Encode(const <int>[9, 9]),
+        );
+      }
+    });
+
     test('throws 401 when token provider returns null', () async {
       final c = MockClient((_) async => http.Response('', 200));
       final client = build(c, nullToken: true);
