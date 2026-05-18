@@ -297,6 +297,14 @@ class ConnectionsScreen extends ConsumerWidget {
 
                       if (!context.mounted) return;
                       navigator.pop();
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Saved ${kind.name} connection "${label.text.trim()}". '
+                            'Pull-to-refresh the dashboard to sync.',
+                          ),
+                        ),
+                      );
                     } catch (e) {
                       messenger.showSnackBar(
                         SnackBar(content: Text('Failed to save: $e')),
