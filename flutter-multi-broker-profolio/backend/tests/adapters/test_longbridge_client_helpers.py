@@ -16,6 +16,7 @@ from app.adapters.longbridge.client import (
     _classify_sdk_error,
     _parse_since,
     _row_timestamp,
+    _to_iterable,
 )
 
 # ---------------------------------------------------------------------------
@@ -150,3 +151,53 @@ def test_classify_pass_through_when_already_classified() -> None:
 def test_classify_unknown_exception_passes_through() -> None:
     err = ValueError("something else entirely")
     assert _classify_sdk_error(err) is err
+
+
+# ---------------------------------------------------------------------------
+# _to_iterable
+# ---------------------------------------------------------------------------
+
+
+class _ResponseWith:
+    def __init__(self, **fields: object) -> None:
+        for k, v in fields.items():
+            setattr(self, k, v)
+
+
+def test_to_iterable_none() -> None:
+    assert _to_iterable(None, attribute="channels") == []
+
+
+def test_to_iterable_already_a_list() -> None:
+    items = [1, 2, 3]
+    assert _to_iterable(items, attribute="channels") == [1, 2, 3]
+
+
+def test_to_iterable_tuple() -> None:
+    assert _to_iterable((1, 2), attribute="channels") == [1, 2]
+
+
+def test_to_iterable_uses_primary_attribute() -> None:
+    resp = _ResponseWith(channels=[1, 2])
+    assert _to_iterable(resp, attribute="channels") == [1, 2]
+
+
+def test_to_iterable_falls_back_to_secondary_attribute() -> None:
+    resp = _ResponseWith(accounts=[7, 8])
+    assert _to_iterable(resp, attribute="list", attribute_fallback="accounts") == [
+        7,
+        8,
+    ]
+
+
+def test_to_iterable_iterates_if_iter_supported() -> None:
+    class _Iter:
+        def __iter__(self) -> object:
+            return iter([10, 20])
+
+    assert _to_iterable(_Iter(), attribute="missing") == [10, 20]
+
+
+def test_to_iterable_unsupported_returns_empty() -> None:
+    resp = _ResponseWith(unrelated="thing")
+    assert _to_iterable(resp, attribute="channels") == []

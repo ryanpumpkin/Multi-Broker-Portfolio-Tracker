@@ -49,7 +49,12 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         self._quote_poll_interval = quote_poll_interval
 
     async def list_positions(self) -> list[Any]:
-        channels = await _to_thread(self._trade_ctx.stock_positions)
+        # The LongBridge SDK returns a `StockPositionsResponse` whose
+        # `.channels` attribute is a list of `StockPositionChannel`,
+        # each with its own `.positions`. Some older SDK versions
+        # returned the list directly, so we handle both shapes.
+        result = await _to_thread(self._trade_ctx.stock_positions)
+        channels = _to_iterable(result, attribute="channels")
         rows: list[Any] = []
         for channel in channels:
             positions = getattr(channel, "positions", None)
@@ -60,7 +65,11 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         return rows
 
     async def list_balances(self) -> list[Any]:
-        accounts = await _to_thread(self._trade_ctx.account_balance)
+        # Same shape concern as list_positions: the response object
+        # exposes a `.list` (or `.accounts`) attribute containing the
+        # actual rows on newer SDK versions.
+        result = await _to_thread(self._trade_ctx.account_balance)
+        accounts = _to_iterable(result, attribute="list", attribute_fallback="accounts")
         rows: list[Any] = []
         for account in accounts:
             cash_infos = getattr(account, "cash_infos", None)
@@ -85,9 +94,11 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         since: str | None,
         limit: int | None,
     ) -> list[Any]:
-        # LongBridge executions endpoint is "today" scoped.
-        executions = await _to_thread(self._trade_ctx.today_executions)
-        rows = list(executions)
+        # LongBridge executions endpoint is "today" scoped. The response
+        # may be a `TodayExecutionsResponse` with `.trades` (newer SDK)
+        # or a bare iterable of executions (older SDK).
+        result = await _to_thread(self._trade_ctx.today_executions)
+        rows = list(_to_iterable(result, attribute="trades"))
 
         if since is not None:
             threshold = _parse_since(since)
@@ -125,6 +136,43 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
                 payload.setdefault("timestamp", now)
                 yield payload
             await asyncio.sleep(self._quote_poll_interval)
+
+
+def _to_iterable(
+    value: Any,
+    *,
+    attribute: str,
+    attribute_fallback: str | None = None,
+) -> list[Any]:
+    """Coerce an SDK response into a list of rows.
+
+    Newer LongBridge SDK versions wrap query results in a typed response
+    object (e.g. `StockPositionsResponse`) whose actual list lives under
+    a named attribute. Older versions return the list directly. Handle
+    both by:
+      1. If `value` is iterable (list/tuple/dict-values), return list(value).
+      2. Else if it has `.<attribute>` attribute, use that.
+      3. Else if `attribute_fallback` is given and present, use that.
+      4. Else return an empty list.
+    """
+    if value is None:
+        return []
+    # Already iterable list-likes — most importantly excludes plain objects
+    # so we don't accidentally iterate field-by-field.
+    if isinstance(value, list | tuple):
+        return list(value)
+    primary = getattr(value, attribute, None)
+    if primary is not None:
+        return list(primary)
+    if attribute_fallback is not None:
+        fallback = getattr(value, attribute_fallback, None)
+        if fallback is not None:
+            return list(fallback)
+    # Last resort: try iterating; if not iterable, give up.
+    try:
+        return list(iter(value))
+    except TypeError:
+        return []
 
 
 async def _to_thread(fn: Any, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - thin asyncio glue exercised only through real SDK calls
