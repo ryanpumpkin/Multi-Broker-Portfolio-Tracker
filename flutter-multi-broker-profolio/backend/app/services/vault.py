@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import inspect
@@ -313,26 +314,202 @@ class InMemoryConnectionVaultStore:
 
 
 class FirestoreConnectionVaultStore:
-    """Firestore-backed store placeholder.
+    """Firestore-backed connection vault store with safe in-memory fallback.
 
-    Stub by interface until Firestore wiring lands.
+    The fallback preserves local-dev/test behavior when Firebase Admin is not
+    configured, while production deployments read and write the canonical
+    `users/{uid}/connections/{cid}` documents.
     """
 
+    def __init__(
+        self,
+        *,
+        firestore_client: Any | None = None,
+        fallback: ConnectionVaultStore | None = None,
+    ) -> None:
+        self._firestore_client = firestore_client
+        self._fallback = fallback or InMemoryConnectionVaultStore()
+
     async def put(self, record: ConnectionCredentialRecord) -> ConnectionCredentialRecord:
-        msg = "FirestoreConnectionVaultStore is not wired yet"
-        raise NotImplementedError(msg)
+        client = self._client()
+        if client is None:
+            return await self._fallback.put(record)
+
+        payload = self._to_firestore_payload(record)
+        try:
+            doc = self._connection_doc(client, user_id=record.user_id, connection_id=record.connection_id)
+            await _run_blocking(doc.set, payload, merge=True)
+            return record
+        except Exception:
+            return await self._fallback.put(record)
 
     async def get(self, *, user_id: str, connection_id: str) -> ConnectionCredentialRecord | None:
-        msg = "FirestoreConnectionVaultStore is not wired yet"
-        raise NotImplementedError(msg)
+        client = self._client()
+        if client is None:
+            return await self._fallback.get(user_id=user_id, connection_id=connection_id)
+
+        try:
+            doc = self._connection_doc(client, user_id=user_id, connection_id=connection_id)
+            snap = await _run_blocking(doc.get)
+            if not getattr(snap, "exists", False):
+                return None
+            data = _safe_to_dict(snap)
+            return self._from_firestore_doc(
+                user_id=user_id,
+                connection_id=connection_id,
+                payload=data,
+            )
+        except Exception:
+            return await self._fallback.get(user_id=user_id, connection_id=connection_id)
 
     async def list_for_user(self, *, user_id: str) -> list[ConnectionCredentialRecord]:
-        msg = "FirestoreConnectionVaultStore is not wired yet"
-        raise NotImplementedError(msg)
+        client = self._client()
+        if client is None:
+            return await self._fallback.list_for_user(user_id=user_id)
+
+        try:
+            col = self._connections_collection(client, user_id=user_id)
+            snap = await _run_blocking(col.get)
+            docs = list(getattr(snap, "docs", []) or [])
+            out: list[ConnectionCredentialRecord] = []
+            for doc in docs:
+                payload = _safe_to_dict(doc)
+                connection_id: str | None
+                try:
+                    connection_id = doc.id
+                except AttributeError:
+                    connection_id = None
+                out.append(
+                    self._from_firestore_doc(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        payload=payload,
+                    )
+                )
+            return out
+        except Exception:
+            return await self._fallback.list_for_user(user_id=user_id)
 
     async def delete(self, *, user_id: str, connection_id: str) -> ConnectionCredentialRecord | None:
-        msg = "FirestoreConnectionVaultStore is not wired yet"
-        raise NotImplementedError(msg)
+        existing = await self.get(user_id=user_id, connection_id=connection_id)
+        if existing is None:
+            return None
+
+        client = self._client()
+        if client is None:
+            await self._fallback.delete(user_id=user_id, connection_id=connection_id)
+            return existing
+
+        try:
+            doc = self._connection_doc(client, user_id=user_id, connection_id=connection_id)
+            await _run_blocking(doc.delete)
+            return existing
+        except Exception:
+            await self._fallback.delete(user_id=user_id, connection_id=connection_id)
+            return existing
+
+    def _client(self) -> Any | None:
+        if self._firestore_client is not None:
+            return self._firestore_client
+        try:
+            from firebase_admin import firestore
+
+            return firestore.client()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _connections_collection(client: Any, *, user_id: str) -> Any:
+        return client.collection("users").document(user_id).collection("connections")
+
+    @classmethod
+    def _connection_doc(cls, client: Any, *, user_id: str, connection_id: str) -> Any:
+        return cls._connections_collection(client, user_id=user_id).document(connection_id)
+
+    @staticmethod
+    def _to_firestore_payload(record: ConnectionCredentialRecord) -> dict[str, Any]:
+        mode = (
+            "serverKey"
+            if record.credential_mode is CredentialMode.SERVER_KEY
+            else "e2e"
+        )
+        payload: dict[str, Any] = {
+            "id": record.connection_id,
+            "kind": record.source,
+            "source": record.source,
+            "label": record.display_name,
+            "display_name": record.display_name,
+            "credentialMode": mode,
+            "credential_mode": record.credential_mode.value,
+            "enabled": record.enabled,
+            "server_key_mode": record.credential_mode is CredentialMode.SERVER_KEY,
+            "encryptedBlob": record.e2e_encrypted_blob,
+            "e2e_encrypted_blob": record.e2e_encrypted_blob,
+            "server_encrypted_secret": (
+                record.server_encrypted_secret.model_dump()
+                if record.server_encrypted_secret is not None
+                else None
+            ),
+            "createdAt": record.created_at,
+            "updatedAt": record.updated_at,
+        }
+        return payload
+
+    @staticmethod
+    def _from_firestore_doc(
+        *,
+        user_id: str,
+        connection_id: str | None,
+        payload: dict[str, Any],
+    ) -> ConnectionCredentialRecord:
+        cid = (
+            _first_str(
+                connection_id,
+                payload.get("id"),
+                payload.get("connection_id"),
+            )
+            or ""
+        )
+        source = _first_str(payload.get("source"), payload.get("kind")) or "manual"
+        display_name = (
+            _first_str(
+                payload.get("display_name"),
+                payload.get("displayName"),
+                payload.get("label"),
+            )
+            or cid
+        )
+        enabled = bool(payload.get("enabled", True))
+
+        mode = _parse_credential_mode(
+            payload.get("credential_mode"),
+            payload.get("credentialMode"),
+            payload.get("mode"),
+            payload.get("server_key_mode"),
+        )
+
+        e2e_blob = _first_str(
+            payload.get("e2e_encrypted_blob"),
+            payload.get("encrypted_blob"),
+            payload.get("encryptedBlob"),
+        )
+
+        server_secret = _parse_server_secret(payload.get("server_encrypted_secret"))
+        created_at = _coerce_datetime(payload.get("created_at") or payload.get("createdAt"))
+        updated_at = _coerce_datetime(payload.get("updated_at") or payload.get("updatedAt"))
+
+        return ConnectionCredentialRecord(
+            user_id=user_id,
+            connection_id=cid,
+            source=source,
+            display_name=display_name,
+            credential_mode=mode,
+            e2e_encrypted_blob=e2e_blob,
+            server_encrypted_secret=server_secret,
+            enabled=enabled,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
 
 
 class E2ECredentialCodec:
@@ -639,6 +816,75 @@ def _b64e(raw: bytes) -> str:
 
 def _b64d(raw: str) -> bytes:
     return base64.b64decode(raw.encode("ascii"))
+
+
+async def _run_blocking(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    if inspect.iscoroutinefunction(fn):
+        async_fn = cast(Callable[..., Awaitable[T]], fn)
+        return await async_fn(*args, **kwargs)
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+def _safe_to_dict(snapshot: Any) -> dict[str, Any]:
+    to_dict = getattr(snapshot, "to_dict", None)
+    if not callable(to_dict):
+        return {}
+    payload = to_dict()
+    if isinstance(payload, dict):
+        return cast(dict[str, Any], payload)
+    return {}
+
+
+def _first_str(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _parse_credential_mode(*values: Any) -> CredentialMode:
+    for value in values:
+        if isinstance(value, bool):
+            return CredentialMode.SERVER_KEY if value else CredentialMode.E2E
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip().lower().replace("_", "-")
+        if normalized in {"server-key", "serverkey", "server", "kms"}:
+            return CredentialMode.SERVER_KEY
+        if normalized in {"e2e", "client"}:
+            return CredentialMode.E2E
+    return CredentialMode.E2E
+
+
+def _parse_server_secret(raw: Any) -> EncryptedSecret | None:
+    if raw is None:
+        return None
+    if isinstance(raw, EncryptedSecret):
+        return raw
+    if isinstance(raw, dict):
+        try:
+            return EncryptedSecret.model_validate(raw)
+        except Exception:
+            return None
+    return None
+
+
+def _coerce_datetime(raw: Any) -> datetime:
+    if isinstance(raw, datetime):
+        if raw.tzinfo is None:
+            return raw.replace(tzinfo=UTC)
+        return raw.astimezone(UTC)
+
+    if isinstance(raw, str) and raw.strip():
+        candidate = raw.strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(candidate)
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
+        except ValueError:
+            pass
+    return datetime.now(UTC)
 
 
 def _to_metadata(record: ConnectionCredentialRecord) -> ConnectionMetadata:

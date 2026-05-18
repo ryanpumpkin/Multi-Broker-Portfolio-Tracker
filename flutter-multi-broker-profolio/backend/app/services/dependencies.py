@@ -26,7 +26,7 @@ from app.services.vault import (
     ConnectionVaultStore,
     CredentialMode,
     CredentialVaultService,
-    InMemoryConnectionVaultStore,
+    FirestoreConnectionVaultStore,
     KmsProvider,
     build_kms_provider,
 )
@@ -119,8 +119,7 @@ def get_kms_provider(settings: Settings | None = None) -> KmsProvider:
 
 @lru_cache(maxsize=1)
 def get_connection_vault_store() -> ConnectionVaultStore:
-    # Stub: backend-vault interface is in place; Firestore wiring comes later.
-    return InMemoryConnectionVaultStore()
+    return FirestoreConnectionVaultStore()
 
 
 @lru_cache(maxsize=1)

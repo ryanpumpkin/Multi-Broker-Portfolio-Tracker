@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from app.services.vault import (
     FAILED_DECRYPT_COUNTER,
+    ConnectionCredentialRecord,
     ConnectionMetadata,
     CreateConnectionInput,
     CredentialMode,
     CredentialVaultService,
     E2ECredentialCodec,
+    FirestoreConnectionVaultStore,
     InMemoryConnectionVaultStore,
     InMemoryKmsProvider,
     SwitchModeInput,
@@ -231,3 +234,168 @@ async def test_credential_use_audit_log_omits_plaintext() -> None:
     assert payload["mode"] == CredentialMode.SERVER_KEY.value
     assert payload["purpose"] == "healthcheck"
     assert secret not in json.dumps(payload)
+
+
+class _FakeSnapshot:
+    def __init__(self, doc_id: str, payload: dict[str, Any] | None) -> None:
+        self.id = doc_id
+        self._payload = payload
+
+    @property
+    def exists(self) -> bool:
+        return self._payload is not None
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self._payload or {})
+
+
+class _FakeQuerySnapshot:
+    def __init__(self, docs: list[_FakeSnapshot]) -> None:
+        self.docs = docs
+
+
+class _FakeConnectionDocRef:
+    def __init__(self, store: dict[str, dict[str, Any]], connection_id: str) -> None:
+        self._store = store
+        self._connection_id = connection_id
+
+    def set(self, payload: dict[str, Any], merge: bool = False) -> None:
+        if merge and self._connection_id in self._store:
+            self._store[self._connection_id].update(payload)
+            return
+        self._store[self._connection_id] = dict(payload)
+
+    def get(self) -> _FakeSnapshot:
+        payload = self._store.get(self._connection_id)
+        return _FakeSnapshot(self._connection_id, payload)
+
+    def delete(self) -> None:
+        self._store.pop(self._connection_id, None)
+
+
+class _FakeConnectionsCollection:
+    def __init__(self, store: dict[str, dict[str, Any]]) -> None:
+        self._store = store
+
+    def document(self, connection_id: str) -> _FakeConnectionDocRef:
+        return _FakeConnectionDocRef(self._store, connection_id)
+
+    def get(self) -> _FakeQuerySnapshot:
+        docs = [_FakeSnapshot(doc_id, payload) for doc_id, payload in self._store.items()]
+        return _FakeQuerySnapshot(docs)
+
+
+class _FakeUserDocRef:
+    def __init__(self, users: dict[str, dict[str, dict[str, Any]]], user_id: str) -> None:
+        self._users = users
+        self._user_id = user_id
+
+    def collection(self, name: str) -> _FakeConnectionsCollection:
+        if name != "connections":
+            msg = f"unexpected collection: {name}"
+            raise AssertionError(msg)
+        store = self._users.setdefault(self._user_id, {})
+        return _FakeConnectionsCollection(store)
+
+
+class _FakeUsersCollection:
+    def __init__(self, users: dict[str, dict[str, dict[str, Any]]]) -> None:
+        self._users = users
+
+    def document(self, user_id: str) -> _FakeUserDocRef:
+        return _FakeUserDocRef(self._users, user_id)
+
+
+class _FakeFirestoreClient:
+    def __init__(self, users: dict[str, dict[str, dict[str, Any]]] | None = None) -> None:
+        self.users = users or {}
+
+    def collection(self, name: str) -> _FakeUsersCollection:
+        if name != "users":
+            msg = f"unexpected collection: {name}"
+            raise AssertionError(msg)
+        return _FakeUsersCollection(self.users)
+
+
+class _FailingFirestoreClient:
+    def collection(self, _name: str) -> _FakeUsersCollection:
+        raise RuntimeError("firestore unavailable")
+
+
+@pytest.mark.asyncio
+async def test_firestore_store_reads_flutter_shaped_connection_documents() -> None:
+    seeded = {
+        "u-1": {
+            "conn-1": {
+                "id": "conn-1",
+                "kind": "longbridge",
+                "label": "Long Bridge",
+                "credentialMode": "e2e",
+                "encryptedBlob": "wrapped-blob",
+                "enabled": True,
+                "updatedAt": "2026-05-18T10:11:12Z",
+            }
+        }
+    }
+    store = FirestoreConnectionVaultStore(firestore_client=_FakeFirestoreClient(seeded))
+
+    rows = await store.list_for_user(user_id="u-1")
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.connection_id == "conn-1"
+    assert row.source == "longbridge"
+    assert row.display_name == "Long Bridge"
+    assert row.credential_mode is CredentialMode.E2E
+    assert row.e2e_encrypted_blob == "wrapped-blob"
+
+
+@pytest.mark.asyncio
+async def test_firestore_store_put_persists_connection_document_shape() -> None:
+    client = _FakeFirestoreClient()
+    store = FirestoreConnectionVaultStore(firestore_client=client)
+    record = ConnectionCredentialRecord(
+        user_id="u-2",
+        connection_id="conn-2",
+        source="ibkr",
+        display_name="Interactive Brokers",
+        credential_mode=CredentialMode.SERVER_KEY,
+        enabled=True,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+    saved = await store.put(record)
+
+    assert saved == record
+    payload = client.users["u-2"]["conn-2"]
+    assert payload["kind"] == "ibkr"
+    assert payload["label"] == "Interactive Brokers"
+    assert payload["credentialMode"] == "serverKey"
+    assert payload["credential_mode"] == "server-key"
+    assert payload["server_key_mode"] is True
+
+
+@pytest.mark.asyncio
+async def test_firestore_store_falls_back_to_in_memory_when_firestore_fails() -> None:
+    fallback = InMemoryConnectionVaultStore()
+    store = FirestoreConnectionVaultStore(
+        firestore_client=_FailingFirestoreClient(),
+        fallback=fallback,
+    )
+    record = ConnectionCredentialRecord(
+        user_id="u-3",
+        connection_id="conn-3",
+        source="futu",
+        display_name="Futu",
+        credential_mode=CredentialMode.E2E,
+        e2e_encrypted_blob="blob",
+        enabled=True,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+    _ = await store.put(record)
+    loaded = await store.get(user_id="u-3", connection_id="conn-3")
+
+    assert loaded == record
