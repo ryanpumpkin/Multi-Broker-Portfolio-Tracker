@@ -37,14 +37,9 @@ services:
     environment:
       MBP_ENV: development
       MBP_LOG_LEVEL: DEBUG
-      MBP_AUTH_DISABLED: "true"
       # Skip real broker connections in dev — set adapters to disabled mode.
       IBKR_ADAPTER: disabled
       FUTU_ADAPTER: disabled
-      # Point Firebase SDKs at the local emulator suite.
-      FIREBASE_AUTH_EMULATOR_HOST: firebase-emulator:9099
-      FIRESTORE_EMULATOR_HOST: firebase-emulator:8080
-      FIREBASE_STORAGE_EMULATOR_HOST: firebase-emulator:9199
     ports:
       - "8000:8000"
 
