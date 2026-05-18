@@ -4,7 +4,7 @@ Each module has its own task file under `doc/tasks/`. Tick a module here once **
 
 ## Flutter Client
 
-- [~] [flutter-bootstrap](./flutter-bootstrap.md) — project scaffold, router, theme, i18n, logging landed (28 tests passing, lint clean, ~97% coverage on hand-written code); live-device boot smoke deferred until `firebase_options.dart` lands via firebase-setup
+- [x] [flutter-bootstrap](./flutter-bootstrap.md) — project scaffold, router, theme, i18n, logging (28 tests passing, lint clean, ~97% coverage); firebase_options.dart + platform config files generated via flutterfire configure
 - [x] [flutter-domain](./flutter-domain.md) — entities, repo interfaces, use cases (54 domain tests passing, 99% domain coverage, lint clean)
 - [x] [flutter-data](./flutter-data.md) — Drift, secure storage, E2E crypto, remote clients, repos (166 tests passing, lint clean; 87.47% coverage on hand-written `lib/data/*` excluding generated `app_database.g.dart`)
 - [x] [flutter-state](./flutter-state.md) — Riverpod providers (184 tests passing, `flutter analyze` clean, `lib/state/*` coverage 94.12%)
@@ -22,7 +22,7 @@ Each module has its own task file under `doc/tasks/`. Tick a module here once **
 
 ## Platform / Infra
 
-- [~] [firebase-setup](./firebase-setup.md) — rules, indexes, schema, and emulator tests landed (10/10 passing); client SDK config files (plist/json/`firebase_options.dart`) deferred to developer via `flutterfire configure` — see `firebase/CLIENT_CONFIG.md`
+- [x] [firebase-setup](./firebase-setup.md) — rules, indexes, schema, emulator tests (10/10 passing); client SDK config files generated via flutterfire configure
 - [x] [infra-deployment](./infra-deployment.md) — docker-compose with IBKR/Futu sidecars, Firebase emulator, smoke test (`docker compose config` validates; smoke test documented and executable)
 
 ---
