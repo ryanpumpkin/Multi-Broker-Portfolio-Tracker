@@ -1,14 +1,19 @@
 """IBKR Client Portal Gateway adapter.
 
-The adapter talks to a co-located CP Gateway through an injected
-`IbkrClient` Protocol. A keep-alive ping loop is exposed because CP
-Gateway expires sessions after a few minutes of inactivity (detailed-design
-§4.3 / §7.2).
+The adapter talks to a co-located gateway through an injected `IbkrClient`
+Protocol. For production, `IBKRClient` wraps `ib_insync` and connects to the
+gateway host/port configured via `MBP_IB_GATEWAY_HOST` /
+`MBP_IB_GATEWAY_PORT`.
+
+A keep-alive ping loop is exposed because IBKR sessions can expire after
+periods of inactivity (detailed-design §4.3 / §7.2).
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -16,7 +21,9 @@ from typing import Any, Protocol
 
 from app.adapters._common import (
     HealthTracker,
+    PermanentError,
     RetryPolicy,
+    TransientError,
     retry_async,
 )
 from app.adapters.base import SourceAdapter
@@ -45,6 +52,215 @@ class IbkrClient(Protocol):
     ) -> list[dict[str, Any]]: ...
 
     def stream_market_data(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]: ...
+
+
+def _classify_ibkr_error(exc: Exception) -> Exception:
+    message = str(exc).lower()
+    permanent_markers = (
+        "auth",
+        "credential",
+        "login",
+        "permission",
+        "not connected",
+        "invalid account",
+    )
+    transient_markers = (
+        "timeout",
+        "temporarily",
+        "try again",
+        "connection reset",
+        "rate limit",
+        "too many requests",
+    )
+    if any(marker in message for marker in permanent_markers):
+        return PermanentError(str(exc))
+    if any(marker in message for marker in transient_markers):
+        return TransientError(str(exc))
+    return TransientError(str(exc))
+
+
+class IBKRClient:
+    """`ib_insync` wrapper for IBKR gateway sidecar calls.
+
+    The wrapper normalizes `accountSummary()`, `positions()`, and `trades()`
+    responses to dict payloads consumed by `IbkrAdapter` map functions.
+    """
+
+    def __init__(
+        self,
+        *,
+        host: str | None = None,
+        port: int | None = None,
+        client_id: int = 1,
+        account_id: str | None = None,
+        connect_timeout: float = 10.0,
+        ib: Any | None = None,
+    ) -> None:
+        self._host = host or os.getenv("MBP_IB_GATEWAY_HOST", "localhost")
+        self._port = port or int(os.getenv("MBP_IB_GATEWAY_PORT", "5000"))
+        self._client_id = client_id
+        self._account_id = account_id
+        self._connect_timeout = connect_timeout
+        self._ib: Any | None = ib
+
+    def _ensure_ib(self) -> Any:
+        if self._ib is None:
+            try:
+                ib_insync_mod = importlib.import_module("ib_insync")
+            except ModuleNotFoundError as exc:  # pragma: no cover - env/setup issue
+                raise PermanentError("ib_insync is not installed") from exc
+            ib_cls = getattr(ib_insync_mod, "IB", None)
+            if ib_cls is None:  # pragma: no cover - env/setup issue
+                raise PermanentError("ib_insync is not installed")
+            self._ib = ib_cls()
+        return self._ib
+
+    async def _connect(self) -> Any:
+        ib = self._ensure_ib()
+        if bool(ib.isConnected()):
+            return ib
+        try:
+            await asyncio.to_thread(
+                ib.connect,
+                self._host,
+                self._port,
+                clientId=self._client_id,
+                timeout=self._connect_timeout,
+                readonly=True,
+                account=self._account_id or "",
+            )
+        except Exception as exc:  # noqa: BLE001 - normalized below
+            raise _classify_ibkr_error(exc) from exc
+        if not bool(ib.isConnected()):
+            raise TransientError("IBKR gateway connection failed")
+        return ib
+
+    async def tickle(self) -> bool:
+        ib = await self._connect()
+        return bool(ib.isConnected())
+
+    async def fetch_positions(self) -> list[dict[str, Any]]:
+        ib = await self._connect()
+        try:
+            rows = await asyncio.to_thread(ib.positions, self._account_id or "")
+        except Exception as exc:  # noqa: BLE001
+            raise _classify_ibkr_error(exc) from exc
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            contract = getattr(row, "contract", None)
+            out.append(
+                {
+                    "acctId": getattr(row, "account", None),
+                    "contractDesc": getattr(contract, "localSymbol", None)
+                    or getattr(contract, "symbol", None),
+                    "listingExchange": getattr(contract, "primaryExchange", None)
+                    or getattr(contract, "exchange", None),
+                    "position": str(getattr(row, "position", "0")),
+                    "avgCost": str(getattr(row, "avgCost", "")),
+                    "mktPrice": str(getattr(row, "marketPrice", "")),
+                    "mktValue": str(getattr(row, "marketValue", "")),
+                    "unrealizedPnl": str(getattr(row, "unrealizedPNL", "")),
+                    "currency": getattr(contract, "currency", "USD"),
+                }
+            )
+        return out
+
+    async def fetch_account_summary(self) -> list[dict[str, Any]]:
+        ib = await self._connect()
+        try:
+            rows = await asyncio.to_thread(ib.accountSummary, self._account_id or "")
+        except Exception as exc:  # noqa: BLE001
+            raise _classify_ibkr_error(exc) from exc
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            tag = str(getattr(row, "tag", ""))
+            if tag not in {"CashBalance", "TotalCashValue"}:
+                continue
+            currency = str(getattr(row, "currency", "")).strip()
+            value = str(getattr(row, "value", "")).strip()
+            if not currency or not value:
+                continue
+            out.append(
+                {
+                    "acctId": getattr(row, "account", None),
+                    "currency": currency,
+                    "cashBalance": value,
+                }
+            )
+        return out
+
+    async def fetch_executions(
+        self, *, since: str | None, limit: int | None
+    ) -> list[dict[str, Any]]:
+        ib = await self._connect()
+        try:
+            trades = await asyncio.to_thread(ib.trades)
+        except Exception as exc:  # noqa: BLE001
+            raise _classify_ibkr_error(exc) from exc
+
+        out: list[dict[str, Any]] = []
+        for trade in trades:
+            contract = getattr(trade, "contract", None)
+            fills = getattr(trade, "fills", None) or []
+            for fill in fills:
+                execution = getattr(fill, "execution", None)
+                if execution is None:
+                    continue
+                out.append(
+                    {
+                        "acctId": getattr(execution, "acctNumber", None),
+                        "execId": getattr(execution, "execId", None),
+                        "symbol": getattr(contract, "localSymbol", None)
+                        or getattr(contract, "symbol", None),
+                        "side": getattr(execution, "side", None),
+                        "size": str(getattr(execution, "shares", "")),
+                        "price": str(getattr(execution, "price", "")),
+                        "currency": getattr(contract, "currency", None),
+                        "net_amount": None,
+                        "time": getattr(execution, "time", None),
+                    }
+                )
+
+        if since is not None:
+            since_dt = _parse_ts(since)
+            out = [row for row in out if _parse_ts(row["time"]) >= since_dt]
+        out.sort(key=lambda row: _parse_ts(row["time"]))
+        if limit is not None:
+            out = out[-limit:]
+        return out
+
+    async def stream_market_data(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]:
+        ib = await self._connect()
+        try:
+            ib_insync_mod = importlib.import_module("ib_insync")
+        except ModuleNotFoundError as exc:  # pragma: no cover - env/setup issue
+            raise PermanentError("ib_insync is not installed") from exc
+        stock_cls = getattr(ib_insync_mod, "Stock", None)
+        if stock_cls is None:  # pragma: no cover - env/setup issue
+            raise PermanentError("ib_insync is not installed")
+
+        contracts = [stock_cls(symbol, "SMART", "USD") for symbol in symbols]
+        try:
+            tickers = await asyncio.to_thread(ib.reqTickers, *contracts)
+        except Exception as exc:  # noqa: BLE001
+            raise _classify_ibkr_error(exc) from exc
+
+        for ticker in tickers:
+            contract = getattr(ticker, "contract", None)
+            symbol = getattr(contract, "symbol", None)
+            if symbol is None:
+                continue
+            price = getattr(ticker, "marketPrice", lambda: None)()
+            if price is None or price != price:  # NaN guard
+                continue
+            yield {
+                "symbol": symbol,
+                "price": str(price),
+                "currency": getattr(contract, "currency", "USD"),
+                "timestamp": datetime.now(UTC),
+            }
 
 
 def _dec(v: Any) -> Decimal:

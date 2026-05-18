@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from app.adapters._common import RetryPolicy
+from app.adapters._common import PermanentError, RetryPolicy, TransientError
 from app.adapters.ibkr import IbkrAdapter
 from app.models.domain import SourceHealthStatus
 
@@ -24,6 +24,8 @@ class FakeIbkrClient:
         quotes: list[dict[str, Any]] | None = None,
         tickle_result: bool = True,
         tickle_raises: Exception | None = None,
+        fail_positions: int = 0,
+        position_error: Exception | None = None,
     ) -> None:
         self._positions = positions or []
         self._accounts = accounts or []
@@ -31,7 +33,10 @@ class FakeIbkrClient:
         self._quotes = quotes or []
         self._tickle_result = tickle_result
         self._tickle_raises = tickle_raises
+        self._fail_positions = fail_positions
+        self._position_error = position_error
         self.tickle_calls = 0
+        self.position_calls = 0
 
     async def tickle(self) -> bool:
         self.tickle_calls += 1
@@ -40,6 +45,12 @@ class FakeIbkrClient:
         return self._tickle_result
 
     async def fetch_positions(self) -> list[dict[str, Any]]:
+        self.position_calls += 1
+        if self._position_error is not None:
+            raise self._position_error
+        if self._fail_positions > 0:
+            self._fail_positions -= 1
+            raise TransientError("rate-limited")
         return self._positions
 
     async def fetch_account_summary(self) -> list[dict[str, Any]]:
@@ -84,6 +95,34 @@ async def test_positions_and_balances_mapping() -> None:
 
     balances = await adapter.list_balances()
     assert balances[0].amount == Decimal("1000")
+
+
+@pytest.mark.asyncio
+async def test_positions_retries_transient_then_succeeds() -> None:
+    client = FakeIbkrClient(
+        positions=[
+            {
+                "acctId": "U1",
+                "contractDesc": "MSFT",
+                "position": "5",
+                "currency": "USD",
+            }
+        ],
+        fail_positions=2,
+    )
+    adapter = IbkrAdapter(client, retry=RetryPolicy(max_attempts=5, initial_delay=0.0, jitter=0.0))
+    out = await adapter.list_positions()
+    assert out[0].symbol == "MSFT"
+    assert client.position_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_positions_credential_error_is_permanent() -> None:
+    client = FakeIbkrClient(position_error=PermanentError("invalid credentials"))
+    adapter = IbkrAdapter(client, retry=RetryPolicy(max_attempts=5, initial_delay=0.0, jitter=0.0))
+    with pytest.raises(PermanentError):
+        await adapter.list_positions()
+    assert client.position_calls == 1
 
 
 @pytest.mark.asyncio
