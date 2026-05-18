@@ -257,7 +257,11 @@ class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
           );
         }
         final ct = await E2eCrypto.production().encrypt(jsonEncode(creds), key);
-        final blob = base64Encode(utf8.encode(jsonEncode(ct.toEncoded())));
+        // `Ciphertext.toEncoded()` already returns a base64-encoded JSON
+        // string; the decrypter calls `Ciphertext.fromEncoded(blob)`.
+        // Wrapping it again with another base64+jsonEncode would store an
+        // extra layer that fromEncoded can't peel.
+        final blob = ct.toEncoded();
         await ref.read(connectionsProvider.notifier).setCredentials(id, blob);
       }
 

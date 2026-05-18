@@ -93,8 +93,8 @@ class WrappedCredentialsBuilder {
         errors[connection.id] = 'Unable to load encrypted credentials';
       } on FormatException {
         errors[connection.id] = 'Stored credentials are malformed';
-      } catch (_) {
-        errors[connection.id] = 'Unable to prepare credentials';
+      } catch (e) {
+        errors[connection.id] = 'Unable to prepare credentials: $e';
       }
     }
 
