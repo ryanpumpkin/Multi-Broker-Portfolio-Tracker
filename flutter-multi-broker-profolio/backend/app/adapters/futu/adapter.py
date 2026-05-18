@@ -2,21 +2,26 @@
 
 The official `futu-api` SDK uses a long-lived TCP connection to a local
 OpenD process. This adapter goes through an injected `FutuClient`
-Protocol so tests can replace it. The trade context must be unlocked with
-the user's trade password per request — it is never persisted.
+Protocol so tests can replace it.
+
+Trade unlock credentials are always read from request context at call
+time; plaintext passwords are never persisted on the adapter instance.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar, Token
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 
 from app.adapters._common import (
     HealthTracker,
+    PermanentError,
     RetryPolicy,
+    TransientError,
     retry_async,
 )
 from app.adapters.base import SourceAdapter
@@ -29,6 +34,35 @@ from app.models.domain import (
 )
 
 SOURCE_NAME = "futu"
+_request_trade_password: ContextVar[str | None] = ContextVar(
+    "futu_trade_password",
+    default=None,
+)
+
+
+def get_request_trade_password() -> str | None:
+    """Return request-scoped trade password (if any)."""
+    return _request_trade_password.get()
+
+
+def set_request_trade_password(password: str | None) -> Token[str | None]:
+    """Set request-scoped trade password and return reset token."""
+    return _request_trade_password.set(password)
+
+
+def reset_request_trade_password(token: Token[str | None]) -> None:
+    """Restore previous request-scoped trade password."""
+    _request_trade_password.reset(token)
+
+
+@contextmanager
+def request_trade_password(password: str | None) -> Iterator[None]:
+    """Context manager helper for request-scoped password binding."""
+    token = set_request_trade_password(password)
+    try:
+        yield
+    finally:
+        reset_request_trade_password(token)
 
 
 class FutuClient(Protocol):
@@ -42,7 +76,7 @@ class FutuClient(Protocol):
 
     async def fetch_accounts(self) -> list[dict[str, Any]]: ...
 
-    async def fetch_history_orders(
+    async def fetch_history_deals(
         self, *, since: str | None, limit: int | None
     ) -> list[dict[str, Any]]: ...
 
@@ -121,6 +155,41 @@ def _map_quote(raw: dict[str, Any]) -> Quote:
     )
 
 
+def _normalize_error(exc: Exception) -> Exception:
+    if isinstance(exc, PermanentError | TransientError):
+        return exc
+    message = str(exc)
+    lowered = message.lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "rate limit",
+            "too many request",
+            "too many requests",
+            "quota",
+            "throttle",
+            "temporarily unavailable",
+            "timeout",
+        )
+    ):
+        return TransientError(message)
+    if any(
+        marker in lowered
+        for marker in (
+            "unlock",
+            "password",
+            "pwd",
+            "credential",
+            "permission",
+            "unauthorized",
+            "forbidden",
+            "auth",
+        )
+    ):
+        return PermanentError(message)
+    return exc
+
+
 class FutuAdapter(SourceAdapter):
     """Futu OpenD adapter."""
 
@@ -130,29 +199,36 @@ class FutuAdapter(SourceAdapter):
         self,
         client: FutuClient,
         *,
-        trade_password: str | None = None,
+        unlock_password_provider: Callable[[], str | None] | None = None,
         retry: RetryPolicy | None = None,
         health: HealthTracker | None = None,
     ) -> None:
         self._client = client
-        self._trade_password = trade_password
+        self._unlock_password_provider = unlock_password_provider or get_request_trade_password
         self._retry = retry or RetryPolicy()
         self._health = health or HealthTracker(source=SOURCE_NAME)
 
     @asynccontextmanager
     async def _unlocked(self) -> AsyncIterator[None]:
-        if self._trade_password is None:
+        password = self._unlock_password_provider()
+        if password is None:
             yield
             return
-        await self._client.unlock_trade(self._trade_password)
+        await self._client.unlock_trade(password)
         try:
             yield
         finally:
             await self._client.lock_trade()
 
     async def _call(self, func: Callable[[], Awaitable[Any]]) -> Any:
+        async def _wrapped() -> Any:
+            try:
+                return await func()
+            except Exception as exc:  # noqa: BLE001
+                raise _normalize_error(exc) from exc
+
         try:
-            result = await retry_async(func, policy=self._retry)
+            result = await retry_async(_wrapped, policy=self._retry)
         except Exception as exc:
             self._health.record_failure(str(exc))
             raise
@@ -183,7 +259,7 @@ class FutuAdapter(SourceAdapter):
     ) -> list[Transaction]:
         async def _do() -> list[dict[str, Any]]:
             async with self._unlocked():
-                return await self._client.fetch_history_orders(since=since, limit=limit)
+                return await self._client.fetch_history_deals(since=since, limit=limit)
 
         raw = await self._call(_do)
         return [_map_transaction(item) for item in raw]
@@ -202,3 +278,14 @@ class FutuAdapter(SourceAdapter):
         except Exception as exc:  # noqa: BLE001
             self._health.record_failure(str(exc))
         return self._health.snapshot()
+
+
+__all__ = [
+    "FutuAdapter",
+    "FutuClient",
+    "SOURCE_NAME",
+    "get_request_trade_password",
+    "request_trade_password",
+    "reset_request_trade_password",
+    "set_request_trade_password",
+]
