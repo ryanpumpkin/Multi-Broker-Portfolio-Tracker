@@ -15,7 +15,7 @@ Each module has its own task file under `doc/tasks/`. Tick a module here once **
 ## Backend Proxy
 
 - [x] [backend-bootstrap](./backend-bootstrap.md) — FastAPI scaffold, auth middleware, ops endpoints
-- [ ] [backend-adapters](./backend-adapters.md) — LongBridge, IBKR, Futu, Binance adapters
+- [x] [backend-adapters](./backend-adapters.md) — LongBridge, IBKR, Futu, Binance adapters with retry/health; SDKs dependency-injected behind Protocol wrappers (69 tests passing, 97.73% project coverage, lint + mypy --strict clean)
 - [ ] [backend-aggregator-and-fx](./backend-aggregator-and-fx.md) — aggregation + FX service
 - [ ] [backend-vault](./backend-vault.md) — credential vault (E2E + KMS)
 - [ ] [backend-alert-worker](./backend-alert-worker.md) — background alert evaluator

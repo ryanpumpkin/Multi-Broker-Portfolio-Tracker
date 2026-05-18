@@ -61,4 +61,4 @@ addopts = "-ra"
 
 [tool.coverage.run]
 source = ["app"]
-omit = ["app/adapters/*", "app/services/*", "app/workers/*"]
+omit = ["app/services/*", "app/workers/*"]
