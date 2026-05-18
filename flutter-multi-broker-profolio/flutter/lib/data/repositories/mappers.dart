@@ -94,28 +94,44 @@ class Mappers {
         .whereType<Map<String, dynamic>>()
         .map(positionFromJson)
         .toList(growable: false);
-    final balances = (j['cashBalances'] as List? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .map(cashBalanceFromJson)
-        .toList(growable: false);
+    // Backend serialises as `balances`; older Flutter-side fixtures use
+    // `cashBalances`. Accept both.
+    final balances =
+        ((j['balances'] as List?) ?? (j['cashBalances'] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(cashBalanceFromJson)
+            .toList(growable: false);
     final sourceHealth = ((j['sourceHealth'] as List?) ??
             (j['source_health'] as List?) ??
             const [])
         .whereType<Map<String, dynamic>>()
         .map(sourceHealthFromJson)
         .toList(growable: false);
+    final asOfRaw = (j['asOf'] ?? j['as_of']) as String?;
     return PortfolioSnapshot(
-      asOf: DateTime.parse(j['asOf'] as String).toUtc(),
-      baseCurrency: j['baseCurrency'] as String,
+      asOf:
+          asOfRaw != null ? DateTime.parse(asOfRaw).toUtc() : DateTime.now().toUtc(),
+      baseCurrency:
+          (j['baseCurrency'] as String?) ?? (j['base_currency'] as String?) ?? 'USD',
       positions: positions,
       cashBalances: balances,
       sourceHealth: sourceHealth,
-      totalsBySource: ((j['totalsBySource'] as Map?) ?? const {})
-          .map((k, v) => MapEntry(k as String, _num(v))),
-      totalsByCurrency: ((j['totalsByCurrency'] as Map?) ?? const {})
-          .map((k, v) => MapEntry(k as String, _num(v))),
-      totalBaseValue: _num(j['totalBaseValue']),
-      totalUnrealizedPnlBase: _num(j['totalUnrealizedPnlBase']),
+      totalsBySource:
+          (((j['totalsBySource'] as Map?) ?? (j['totals_by_source'] as Map?)) ??
+                  const {})
+              .map((k, v) => MapEntry(k as String, _num(v))),
+      totalsByCurrency:
+          (((j['totalsByCurrency'] as Map?) ?? (j['totals_by_currency'] as Map?)) ??
+                  const {})
+              .map((k, v) => MapEntry(k as String, _num(v))),
+      totalBaseValue: _num(
+        j['totalBaseValue'] ?? j['total_base_value'] ?? j['total_market_value'],
+      ),
+      totalUnrealizedPnlBase: _num(
+        j['totalUnrealizedPnlBase'] ??
+            j['total_unrealized_pnl_base'] ??
+            j['total_unrealized_pnl'],
+      ),
     );
   }
 
