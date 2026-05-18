@@ -97,15 +97,32 @@ void main() {
     });
 
     test('connection round-trip', () {
-      const c = Connection(
+      final c = Connection(
         id: 'c1',
         kind: ConnectionKind.longbridge,
         label: 'My LB',
         status: ConnectionStatus.ok,
         credentialMode: CredentialMode.e2e,
+        lastSyncAt: DateTime.utc(2026, 5, 18, 12, 0),
+        errorMessage: 'auth failed',
       );
       final back = Mappers.connectionFromJson(Mappers.connectionToJson(c));
       expect(back, c);
+    });
+
+    test('connectionFromJson parses snake_case last_sync_at and error_message',
+        () {
+      final back = Mappers.connectionFromJson({
+        'id': 'c1',
+        'kind': 'ibkr',
+        'label': 'IBKR',
+        'status': 'error',
+        'credentialMode': 'serverKey',
+        'last_sync_at': '2026-05-18T10:00:00Z',
+        'error_message': 'gateway timeout',
+      });
+      expect(back.lastSyncAt, DateTime.utc(2026, 5, 18, 10, 0));
+      expect(back.errorMessage, 'gateway timeout');
     });
 
     test('manual holding round-trip', () {

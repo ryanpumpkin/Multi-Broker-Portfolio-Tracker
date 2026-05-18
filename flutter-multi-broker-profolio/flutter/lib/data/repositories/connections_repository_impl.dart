@@ -28,22 +28,25 @@ class ConnectionsRepositoryImpl implements ConnectionsRepository {
     } catch (_) {
       final rows = await db.listConnections();
       return rows
-          .map((r) => Connection(
-                id: r.id,
-                kind: ConnectionKind.values.firstWhere(
-                  (k) => k.name == r.kind,
-                  orElse: () => ConnectionKind.manual,
-                ),
-                label: r.label,
-                status: ConnectionStatus.values.firstWhere(
-                  (s) => s.name == r.status,
-                  orElse: () => ConnectionStatus.unknown,
-                ),
-                credentialMode: CredentialMode.values.firstWhere(
-                  (m) => m.name == r.credentialMode,
-                  orElse: () => CredentialMode.e2e,
-                ),
-              ),)
+          .map(
+            (r) => Connection(
+              id: r.id,
+              kind: ConnectionKind.values.firstWhere(
+                (k) => k.name == r.kind,
+                orElse: () => ConnectionKind.manual,
+              ),
+              label: r.label,
+              status: ConnectionStatus.values.firstWhere(
+                (s) => s.name == r.status,
+                orElse: () => ConnectionStatus.unknown,
+              ),
+              credentialMode: CredentialMode.values.firstWhere(
+                (m) => m.name == r.credentialMode,
+                orElse: () => CredentialMode.e2e,
+              ),
+              lastSyncAt: r.lastSyncAt,
+            ),
+          )
           .toList(growable: false);
     }
   }
@@ -82,7 +85,10 @@ class ConnectionsRepositoryImpl implements ConnectionsRepository {
     });
     // Reflect in cache.
     final existing = await db.listConnections();
-    final hit = existing.where((e) => e.id == connectionId).cast<ConnectionMetaRow?>().firstWhere(
+    final hit = existing
+        .where((e) => e.id == connectionId)
+        .cast<ConnectionMetaRow?>()
+        .firstWhere(
           (_) => true,
           orElse: () => null,
         );
@@ -99,6 +105,7 @@ class ConnectionsRepositoryImpl implements ConnectionsRepository {
               orElse: () => ConnectionStatus.unknown,
             ),
             credentialMode: mode,
+            lastSyncAt: hit.lastSyncAt,
           )
         : Connection(
             id: connectionId,
@@ -113,14 +120,16 @@ class ConnectionsRepositoryImpl implements ConnectionsRepository {
 
   Future<void> _writeCache(Iterable<Connection> conns) async {
     for (final c in conns) {
-      await db.upsertConnection(ConnectionsMetaCompanion.insert(
-        id: c.id,
-        kind: c.kind.name,
-        label: c.label,
-        status: c.status.name,
-        credentialMode: c.credentialMode.name,
-        lastSyncAt: Value(DateTime.now().toUtc()),
-      ),);
+      await db.upsertConnection(
+        ConnectionsMetaCompanion.insert(
+          id: c.id,
+          kind: c.kind.name,
+          label: c.label,
+          status: c.status.name,
+          credentialMode: c.credentialMode.name,
+          lastSyncAt: Value(c.lastSyncAt),
+        ),
+      );
     }
   }
 }

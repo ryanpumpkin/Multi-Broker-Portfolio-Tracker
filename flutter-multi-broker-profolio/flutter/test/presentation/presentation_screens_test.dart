@@ -15,6 +15,11 @@ void main() {
     expect(find.byKey(const Key('dashboard_total_value')), findsOneWidget);
     expect(find.byKey(const Key('dashboard_total_pnl')), findsOneWidget);
     expect(find.text('LongBridge'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Binance'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Binance'), findsOneWidget);
   });
 

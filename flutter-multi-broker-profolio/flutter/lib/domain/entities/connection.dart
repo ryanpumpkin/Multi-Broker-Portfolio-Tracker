@@ -41,6 +41,8 @@ class Connection {
     required this.label,
     required this.status,
     required this.credentialMode,
+    this.lastSyncAt,
+    this.errorMessage,
   });
 
   final String id;
@@ -48,6 +50,8 @@ class Connection {
   final String label;
   final ConnectionStatus status;
   final CredentialMode credentialMode;
+  final DateTime? lastSyncAt;
+  final String? errorMessage;
 
   Connection copyWith({
     String? id,
@@ -55,6 +59,8 @@ class Connection {
     String? label,
     ConnectionStatus? status,
     CredentialMode? credentialMode,
+    DateTime? lastSyncAt,
+    String? errorMessage,
   }) {
     return Connection(
       id: id ?? this.id,
@@ -62,6 +68,8 @@ class Connection {
       label: label ?? this.label,
       status: status ?? this.status,
       credentialMode: credentialMode ?? this.credentialMode,
+      lastSyncAt: lastSyncAt ?? this.lastSyncAt,
+      errorMessage: errorMessage ?? this.errorMessage,
     );
   }
 
@@ -74,10 +82,20 @@ class Connection {
           kind == other.kind &&
           label == other.label &&
           status == other.status &&
-          credentialMode == other.credentialMode;
+          credentialMode == other.credentialMode &&
+          lastSyncAt == other.lastSyncAt &&
+          errorMessage == other.errorMessage;
 
   @override
-  int get hashCode => Object.hash(id, kind, label, status, credentialMode);
+  int get hashCode => Object.hash(
+        id,
+        kind,
+        label,
+        status,
+        credentialMode,
+        lastSyncAt,
+        errorMessage,
+      );
 
   @override
   String toString() =>

@@ -105,16 +105,22 @@ void main() {
       expect(a.toString(), contains('USD'));
     });
     test('Connection equality / copyWith / toString', () {
-      const c = Connection(
+      final c = Connection(
         id: 'c1',
         kind: ConnectionKind.binance,
         label: 'Binance Main',
         status: ConnectionStatus.ok,
         credentialMode: CredentialMode.e2e,
+        lastSyncAt: DateTime.utc(2026, 5, 18, 12, 0),
+        errorMessage: 'invalid api key',
       );
       expect(
         c.copyWith(status: ConnectionStatus.error).status,
         ConnectionStatus.error,
+      );
+      expect(
+        c.copyWith(errorMessage: 'timeout').errorMessage,
+        'timeout',
       );
       expect(c.copyWith(), equals(c));
       expect(c.hashCode, equals(c.copyWith().hashCode));

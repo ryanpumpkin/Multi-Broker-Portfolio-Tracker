@@ -137,6 +137,10 @@ class Mappers {
         (m) => m.name == (j['credentialMode'] as String? ?? 'e2e'),
         orElse: () => CredentialMode.e2e,
       ),
+      lastSyncAt: _asUtcDateTime(j['lastSyncAt'] ?? j['last_sync_at']),
+      errorMessage: _stringOrNull(
+        j['errorMessage'] ?? j['error_message'] ?? j['message'],
+      ),
     );
   }
 
@@ -147,6 +151,10 @@ class Mappers {
         'label': c.label,
         'status': c.status.name,
         'credentialMode': c.credentialMode.name,
+        if (c.lastSyncAt != null)
+          'lastSyncAt': c.lastSyncAt!.toUtc().toIso8601String(),
+        if (c.errorMessage != null && c.errorMessage!.isNotEmpty)
+          'errorMessage': c.errorMessage,
       };
 
   // ---------------- SourceHealth -----------------------------------------
@@ -230,4 +238,33 @@ class Mappers {
   }
 
   static double _num(dynamic v) => (v as num?)?.toDouble() ?? 0.0;
+
+  static String? _stringOrNull(dynamic value) {
+    if (value is String && value.trim().isNotEmpty) {
+      return value.trim();
+    }
+    return null;
+  }
+
+  static DateTime? _asUtcDateTime(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value.toUtc();
+    if (value is String) {
+      try {
+        return DateTime.parse(value).toUtc();
+      } on FormatException {
+        return null;
+      }
+    }
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt(), isUtc: true);
+    }
+    final dynamic dyn = value;
+    try {
+      final DateTime maybe = dyn.toDate() as DateTime;
+      return maybe.toUtc();
+    } catch (_) {
+      return null;
+    }
+  }
 }

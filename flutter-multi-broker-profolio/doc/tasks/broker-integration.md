@@ -121,9 +121,9 @@ independent and can be worked in parallel.
 
 ### UI polish
 
-- [ ] On the Connections screen, show `lastSyncAt` next to each
+- [x] On the Connections screen, show `lastSyncAt` next to each
   connection (e.g. "synced 3 min ago").
-- [ ] When a connection's status is `error`, show the error message
+- [x] When a connection's status is `error`, show the error message
   in a tooltip or expandable panel.
 
 ## Quality gates
