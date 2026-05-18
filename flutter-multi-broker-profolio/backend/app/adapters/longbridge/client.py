@@ -127,14 +127,14 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
             await asyncio.sleep(self._quote_poll_interval)
 
 
-async def _to_thread(fn: Any, *args: Any, **kwargs: Any) -> Any:
+async def _to_thread(fn: Any, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - thin asyncio glue exercised only through real SDK calls
     try:
         return await asyncio.to_thread(fn, *args, **kwargs)
     except Exception as exc:  # noqa: BLE001 - normalized below
         raise _classify_sdk_error(exc) from exc
 
 
-def _load_sdk_types() -> tuple[type[Any], type[Any], type[Any]]:
+def _load_sdk_types() -> tuple[type[Any], type[Any], type[Any]]:  # pragma: no cover - imports real longbridge SDK; tested by env-gated integration test
     try:
         module = importlib.import_module("longbridge.openapi")
     except ModuleNotFoundError as exc:

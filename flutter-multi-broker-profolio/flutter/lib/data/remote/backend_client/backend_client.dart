@@ -25,9 +25,15 @@ class BackendClient {
     _http.close();
   }
 
+  static const String mbpCredsHeader = 'X-MBP-Creds';
+  static const String mbpCredsKeyHeader = 'X-MBP-Creds-Key';
+
   // ------------- REST helpers --------------------------------------------
 
-  Future<Map<String, String>> _headers({bool requireAuth = true}) async {
+  Future<Map<String, String>> _headers({
+    bool requireAuth = true,
+    Map<String, String>? extraHeaders,
+  }) async {
     final token = await tokenProvider();
     if (requireAuth && (token == null || token.isEmpty)) {
       throw const BackendException(
@@ -39,6 +45,7 @@ class BackendClient {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      if (extraHeaders != null) ...extraHeaders,
     };
   }
 
@@ -51,7 +58,10 @@ class BackendClient {
     final q = query?.map(
       (k, v) => MapEntry(k, v == null ? '' : v.toString()),
     );
-    return base.replace(path: joined, queryParameters: q?.isEmpty ?? true ? null : q);
+    return base.replace(
+      path: joined,
+      queryParameters: q?.isEmpty ?? true ? null : q,
+    );
   }
 
   Future<dynamic> _send(
@@ -60,8 +70,12 @@ class BackendClient {
     Object? body,
     Map<String, dynamic>? query,
     bool requireAuth = true,
+    Map<String, String>? extraHeaders,
   }) async {
-    final headers = await _headers(requireAuth: requireAuth);
+    final headers = await _headers(
+      requireAuth: requireAuth,
+      extraHeaders: extraHeaders,
+    );
     final url = _u(path, query);
     http.Response resp;
     try {
@@ -76,15 +90,27 @@ class BackendClient {
               );
         case 'POST':
           resp = await _http
-              .post(url, headers: headers, body: body == null ? null : jsonEncode(body))
+              .post(
+                url,
+                headers: headers,
+                body: body == null ? null : jsonEncode(body),
+              )
               .timeout(config.receiveTimeout);
         case 'PUT':
           resp = await _http
-              .put(url, headers: headers, body: body == null ? null : jsonEncode(body))
+              .put(
+                url,
+                headers: headers,
+                body: body == null ? null : jsonEncode(body),
+              )
               .timeout(config.receiveTimeout);
         case 'PATCH':
           resp = await _http
-              .patch(url, headers: headers, body: body == null ? null : jsonEncode(body))
+              .patch(
+                url,
+                headers: headers,
+                body: body == null ? null : jsonEncode(body),
+              )
               .timeout(config.receiveTimeout);
         default:
           throw ArgumentError.value(method, 'method', 'unsupported');
@@ -150,6 +176,19 @@ class BackendClient {
     return decoded;
   }
 
+  Map<String, String>? _credentialHeaders({
+    Map<String, String>? wrappedCredsByConnection,
+    List<int>? wrappedCredsKeyBytes,
+  }) {
+    final creds = wrappedCredsByConnection ?? const <String, String>{};
+    if (creds.isEmpty) return null;
+    return <String, String>{
+      mbpCredsHeader: base64Encode(utf8.encode(jsonEncode(creds))),
+      if (wrappedCredsKeyBytes != null && wrappedCredsKeyBytes.isNotEmpty)
+        mbpCredsKeyHeader: base64Encode(wrappedCredsKeyBytes),
+    };
+  }
+
   // ------------- Endpoints -----------------------------------------------
 
   Future<dynamic> listConnections() => _send('GET', '/connections');
@@ -163,35 +202,73 @@ class BackendClient {
   Future<dynamic> updateConnectionMode(String id, String mode) =>
       _send('PATCH', '/connections/$id', body: <String, dynamic>{'mode': mode});
 
-  Future<dynamic> getPortfolioSnapshot({required String baseCurrency}) =>
+  Future<dynamic> getPortfolioSnapshot({
+    required String baseCurrency,
+    Map<String, String>? wrappedCredsByConnection,
+    List<int>? wrappedCredsKeyBytes,
+  }) =>
       _send(
         'GET',
         '/portfolio/snapshot',
         query: <String, dynamic>{'base': baseCurrency},
+        extraHeaders: _credentialHeaders(
+          wrappedCredsByConnection: wrappedCredsByConnection,
+          wrappedCredsKeyBytes: wrappedCredsKeyBytes,
+        ),
       );
 
-  Future<dynamic> getPositions({String? sourceId}) => _send(
+  Future<dynamic> getPositions({
+    String? sourceId,
+    Map<String, String>? wrappedCredsByConnection,
+    List<int>? wrappedCredsKeyBytes,
+  }) =>
+      _send(
         'GET',
         '/positions',
-        query: sourceId == null ? null : <String, dynamic>{'sourceId': sourceId},
+        query:
+            sourceId == null ? null : <String, dynamic>{'sourceId': sourceId},
+        extraHeaders: _credentialHeaders(
+          wrappedCredsByConnection: wrappedCredsByConnection,
+          wrappedCredsKeyBytes: wrappedCredsKeyBytes,
+        ),
       );
 
   Future<dynamic> getTransactions({
     String? sourceId,
     DateTime? start,
     DateTime? end,
+    Map<String, String>? wrappedCredsByConnection,
+    List<int>? wrappedCredsKeyBytes,
   }) {
     final q = <String, dynamic>{};
     if (sourceId != null) q['sourceId'] = sourceId;
     if (start != null) q['start'] = start.toUtc().toIso8601String();
     if (end != null) q['end'] = end.toUtc().toIso8601String();
-    return _send('GET', '/transactions', query: q.isEmpty ? null : q);
+    return _send(
+      'GET',
+      '/transactions',
+      query: q.isEmpty ? null : q,
+      extraHeaders: _credentialHeaders(
+        wrappedCredsByConnection: wrappedCredsByConnection,
+        wrappedCredsKeyBytes: wrappedCredsKeyBytes,
+      ),
+    );
   }
 
-  Future<dynamic> getBalances({String? sourceId}) => _send(
+  Future<dynamic> getBalances({
+    String? sourceId,
+    Map<String, String>? wrappedCredsByConnection,
+    List<int>? wrappedCredsKeyBytes,
+  }) =>
+      _send(
         'GET',
         '/balances',
-        query: sourceId == null ? null : <String, dynamic>{'sourceId': sourceId},
+        query:
+            sourceId == null ? null : <String, dynamic>{'sourceId': sourceId},
+        extraHeaders: _credentialHeaders(
+          wrappedCredsByConnection: wrappedCredsByConnection,
+          wrappedCredsKeyBytes: wrappedCredsKeyBytes,
+        ),
       );
 
   Future<dynamic> getFxRate({required String base, required String quote}) =>
@@ -222,8 +299,7 @@ class BackendClient {
         : wsBase.path;
     final q = <String, String>{
       if (token != null && token.isNotEmpty) 'token': token,
-      if (symbols != null && symbols.isNotEmpty)
-        'symbols': symbols.join(','),
+      if (symbols != null && symbols.isNotEmpty) 'symbols': symbols.join(','),
     };
     return wsBase.replace(
       path: '$basePath/quotes/stream',

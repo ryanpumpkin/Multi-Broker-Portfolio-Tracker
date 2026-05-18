@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:multi_broker_portfolio/data/data.dart';
+import 'package:multi_broker_portfolio/data/repositories/wrapped_credentials_builder.dart';
 import 'package:multi_broker_portfolio/domain/domain.dart';
 
 void main() {
@@ -205,7 +206,12 @@ void main() {
           200,
         );
       });
-      final repo = TransactionsRepositoryImpl(db: db, backend: backend);
+      final repo = TransactionsRepositoryImpl(
+        db: db,
+        backend: backend,
+        connections: const _StaticConnectionsRepository(<Connection>[]),
+        wrappedCredentialsBuilder: _NoopWrappedCredentialsBuilder(),
+      );
       final list1 = await repo.list(
         sourceId: 'ibkr',
         range: DateRange(
@@ -254,7 +260,12 @@ void main() {
           200,
         );
       });
-      final repo = PortfolioRepositoryImpl(db: db, backend: backend);
+      final repo = PortfolioRepositoryImpl(
+        db: db,
+        backend: backend,
+        connections: const _StaticConnectionsRepository(<Connection>[]),
+        wrappedCredentialsBuilder: _NoopWrappedCredentialsBuilder(),
+      );
 
       final fresh = await repo.getSnapshot(baseCurrency: 'USD');
       expect(fresh.positions, hasLength(1));
@@ -262,6 +273,58 @@ void main() {
       final cached = await repo.getSnapshot(baseCurrency: 'USD');
       expect(cached.positions, isNotEmpty);
 
+      await repo.dispose();
+      await db.close();
+    });
+
+    test('PortfolioRepositoryImpl forwards wrapped credential headers',
+        () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      late http.Request seen;
+      final backend = _backendFromMock((req) async {
+        seen = req;
+        return http.Response(
+          jsonEncode({
+            'asOf': DateTime.utc(2026).toIso8601String(),
+            'baseCurrency': 'USD',
+            'positions': const <Map<String, dynamic>>[],
+            'cashBalances': const <Map<String, dynamic>>[],
+            'totalsBySource': const <String, double>{},
+            'totalsByCurrency': const <String, double>{},
+            'totalBaseValue': 0,
+            'totalUnrealizedPnlBase': 0,
+          }),
+          200,
+        );
+      });
+      final repo = PortfolioRepositoryImpl(
+        db: db,
+        backend: backend,
+        connections: const _StaticConnectionsRepository(<Connection>[
+          Connection(
+            id: 'c1',
+            kind: ConnectionKind.longbridge,
+            label: 'LB',
+            status: ConnectionStatus.ok,
+            credentialMode: CredentialMode.e2e,
+          ),
+        ]),
+        wrappedCredentialsBuilder: _FixedWrappedCredentialsBuilder(
+          tokens: const <String, String>{'c1': 'wrapped-token'},
+          keyBytes: const <int>[1, 2, 3],
+        ),
+      );
+
+      await repo.getSnapshot(baseCurrency: 'USD');
+
+      expect(
+        seen.headers[BackendClient.mbpCredsHeader],
+        isNotNull,
+      );
+      expect(
+        seen.headers[BackendClient.mbpCredsKeyHeader],
+        base64Encode(const <int>[1, 2, 3]),
+      );
       await repo.dispose();
       await db.close();
     });
@@ -286,6 +349,41 @@ void main() {
       expect(out, hasLength(1));
       expect(out.single.symbol, 'AAPL');
       expect(fake.disposed, isTrue);
+    });
+
+    test('TransactionsRepositoryImpl forwards wrapped credential headers',
+        () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      late http.Request seen;
+      final backend = _backendFromMock((req) async {
+        seen = req;
+        return http.Response('[]', 200);
+      });
+      final repo = TransactionsRepositoryImpl(
+        db: db,
+        backend: backend,
+        connections: const _StaticConnectionsRepository(<Connection>[
+          Connection(
+            id: 'c1',
+            kind: ConnectionKind.binance,
+            label: 'BN',
+            status: ConnectionStatus.ok,
+            credentialMode: CredentialMode.e2e,
+          ),
+        ]),
+        wrappedCredentialsBuilder: _FixedWrappedCredentialsBuilder(
+          tokens: const <String, String>{'c1': 'wrapped-token'},
+          keyBytes: const <int>[9, 8, 7],
+        ),
+      );
+
+      await repo.list();
+      expect(seen.headers[BackendClient.mbpCredsHeader], isNotNull);
+      expect(
+        seen.headers[BackendClient.mbpCredsKeyHeader],
+        base64Encode(const <int>[9, 8, 7]),
+      );
+      await db.close();
     });
   });
 }
@@ -402,6 +500,81 @@ class _FailingFirestoreClient implements FirestoreClient {
   @override
   Stream<Map<String, dynamic>?> watchUserSettings(String userId) =>
       const Stream<Map<String, dynamic>?>.empty();
+}
+
+class _StaticConnectionsRepository implements ConnectionsRepository {
+  const _StaticConnectionsRepository(this.items);
+
+  final List<Connection> items;
+
+  @override
+  Future<Connection> add(Connection connection) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<List<Connection>> list() async => items;
+
+  @override
+  Future<void> remove(String connectionId) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> setCredentials(String connectionId, String encryptedBlob) {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<Connection> updateMode(String connectionId, CredentialMode mode) {
+    throw UnimplementedError();
+  }
+}
+
+class _NoopWrappedCredentialsBuilder extends WrappedCredentialsBuilder {
+  _NoopWrappedCredentialsBuilder()
+      : super(
+          firestore: InMemoryFirestoreClient(),
+          userId: 'u1',
+          readCredentialKey: () => null,
+          crypto: E2eCrypto.withKdf(pbkdf2Test(iterations: 1)),
+        );
+
+  @override
+  Future<WrappedCredentialsBuildResult> buildForConnections(
+    Iterable<Connection> connections,
+  ) async {
+    return const WrappedCredentialsBuildResult(
+      tokensByConnection: <String, String>{},
+      errorsByConnection: <String, String>{},
+    );
+  }
+}
+
+class _FixedWrappedCredentialsBuilder extends WrappedCredentialsBuilder {
+  _FixedWrappedCredentialsBuilder({
+    required this.tokens,
+    required this.keyBytes,
+  }) : super(
+          firestore: InMemoryFirestoreClient(),
+          userId: 'u1',
+          readCredentialKey: () => null,
+          crypto: E2eCrypto.withKdf(pbkdf2Test(iterations: 1)),
+        );
+
+  final Map<String, String> tokens;
+  final List<int> keyBytes;
+
+  @override
+  Future<WrappedCredentialsBuildResult> buildForConnections(
+    Iterable<Connection> connections,
+  ) async {
+    return WrappedCredentialsBuildResult(
+      tokensByConnection: tokens,
+      errorsByConnection: const <String, String>{},
+      keyBytes: keyBytes,
+    );
+  }
 }
 
 class _FakeQuotesStream implements QuotesStream {

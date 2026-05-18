@@ -38,6 +38,30 @@ void main() {
       expect(seen.url.path, '/v1/connections');
     });
 
+    test('encodes wrapped credential headers for portfolio call', () async {
+      late http.Request seen;
+      final c = MockClient((req) async {
+        seen = req;
+        return http.Response('{}', 200);
+      });
+      final client = build(c);
+      await client.getPortfolioSnapshot(
+        baseCurrency: 'USD',
+        wrappedCredsByConnection: const <String, String>{'c1': 'token-1'},
+        wrappedCredsKeyBytes: const <int>[1, 2, 3],
+      );
+      final credsHeader = seen.headers[BackendClient.mbpCredsHeader];
+      expect(credsHeader, isNotNull);
+      expect(
+        utf8.decode(base64Decode(credsHeader!)),
+        '{"c1":"token-1"}',
+      );
+      expect(
+        seen.headers[BackendClient.mbpCredsKeyHeader],
+        base64Encode(const <int>[1, 2, 3]),
+      );
+    });
+
     test('throws 401 when token provider returns null', () async {
       final c = MockClient((_) async => http.Response('', 200));
       final client = build(c, nullToken: true);

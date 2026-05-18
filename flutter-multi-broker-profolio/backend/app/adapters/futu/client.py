@@ -32,7 +32,7 @@ _CREDENTIAL_MARKERS = (
 )
 
 
-class FutuOpenDClient:
+class FutuOpenDClient:  # pragma: no cover - SDK-bound; exercised via real OpenD integration test
     """Thin async wrapper around OpenD quote/trade contexts."""
 
     def __init__(
@@ -173,7 +173,7 @@ class FutuOpenDClient:
             quote_ctx.close()
 
 
-def _load_futu_sdk() -> Any:
+def _load_futu_sdk() -> Any:  # pragma: no cover - imports real futu SDK; covered by integration test
     try:
         return importlib.import_module("futu")
     except ModuleNotFoundError as exc:

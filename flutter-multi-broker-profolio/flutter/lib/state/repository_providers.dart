@@ -20,7 +20,9 @@ import '../data/repositories/portfolio_repository_impl.dart';
 import '../data/repositories/quotes_repository_impl.dart';
 import '../data/repositories/settings_repository_impl.dart';
 import '../data/repositories/transactions_repository_impl.dart';
+import '../data/repositories/wrapped_credentials_builder.dart';
 import '../domain/domain.dart';
+import 'credential_key_provider.dart';
 
 // ---------------------------------------------------------------------------
 // Infrastructure providers
@@ -64,9 +66,7 @@ final backendClientProvider = Provider<BackendClient>((ref) {
 
 /// Emits the current signed-in user's UID, or null when signed out.
 final currentUserIdProvider = StreamProvider<String?>((ref) {
-  return FirebaseAuth.instance
-      .authStateChanges()
-      .map((user) => user?.uid);
+  return FirebaseAuth.instance.authStateChanges().map((user) => user?.uid);
 });
 
 // ---------------------------------------------------------------------------
@@ -92,8 +92,7 @@ final authRepositoryProvider = Provider<AuthRepository>(
 // ---------------------------------------------------------------------------
 
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
-  final userId =
-      ref.watch(currentUserIdProvider).valueOrNull ?? '';
+  final userId = ref.watch(currentUserIdProvider).valueOrNull ?? '';
   final repo = SettingsRepositoryImpl(
     db: ref.watch(appDatabaseProvider),
     firestore: ref.watch(firestoreClientProvider),
@@ -104,8 +103,7 @@ final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
 });
 
 final connectionsRepositoryProvider = Provider<ConnectionsRepository>((ref) {
-  final userId =
-      ref.watch(currentUserIdProvider).valueOrNull ?? '';
+  final userId = ref.watch(currentUserIdProvider).valueOrNull ?? '';
   return ConnectionsRepositoryImpl(
     db: ref.watch(appDatabaseProvider),
     firestore: ref.watch(firestoreClientProvider),
@@ -113,10 +111,23 @@ final connectionsRepositoryProvider = Provider<ConnectionsRepository>((ref) {
   );
 });
 
+final wrappedCredentialsBuilderProvider = Provider<WrappedCredentialsBuilder>(
+  (ref) {
+    final userId = ref.watch(currentUserIdProvider).valueOrNull ?? '';
+    return WrappedCredentialsBuilder(
+      firestore: ref.watch(firestoreClientProvider),
+      userId: userId,
+      readCredentialKey: () => ref.read(credentialKeyProvider),
+    );
+  },
+);
+
 final portfolioRepositoryProvider = Provider<PortfolioRepository>((ref) {
   final repo = PortfolioRepositoryImpl(
     db: ref.watch(appDatabaseProvider),
     backend: ref.watch(backendClientProvider),
+    connections: ref.watch(connectionsRepositoryProvider),
+    wrappedCredentialsBuilder: ref.watch(wrappedCredentialsBuilderProvider),
   );
   ref.onDispose(repo.dispose);
   return repo;
@@ -133,12 +144,13 @@ final transactionsRepositoryProvider = Provider<TransactionsRepository>((ref) {
   return TransactionsRepositoryImpl(
     db: ref.watch(appDatabaseProvider),
     backend: ref.watch(backendClientProvider),
+    connections: ref.watch(connectionsRepositoryProvider),
+    wrappedCredentialsBuilder: ref.watch(wrappedCredentialsBuilderProvider),
   );
 });
 
 final alertsRepositoryProvider = Provider<AlertsRepository>((ref) {
-  final userId =
-      ref.watch(currentUserIdProvider).valueOrNull ?? '';
+  final userId = ref.watch(currentUserIdProvider).valueOrNull ?? '';
   return AlertsRepositoryImpl(
     firestore: ref.watch(firestoreClientProvider),
     userId: userId,
@@ -147,8 +159,7 @@ final alertsRepositoryProvider = Provider<AlertsRepository>((ref) {
 
 final manualHoldingsRepositoryProvider =
     Provider<ManualHoldingsRepository>((ref) {
-  final userId =
-      ref.watch(currentUserIdProvider).valueOrNull ?? '';
+  final userId = ref.watch(currentUserIdProvider).valueOrNull ?? '';
   return ManualHoldingsRepositoryImpl(
     firestore: ref.watch(firestoreClientProvider),
     userId: userId,

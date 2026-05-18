@@ -1,0 +1,152 @@
+"""Unit tests for the pure helpers in `app.adapters.longbridge.client`.
+
+The `LongbridgeClient` class itself is exercised only via env-gated
+integration tests because it instantiates the real SDK. These helpers
+are pure and worth covering directly.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+
+from app.adapters._common import PermanentError, TransientError
+from app.adapters.longbridge.client import (
+    _classify_sdk_error,
+    _parse_since,
+    _row_timestamp,
+)
+
+# ---------------------------------------------------------------------------
+# _parse_since
+# ---------------------------------------------------------------------------
+
+
+def test_parse_since_utc_z_suffix() -> None:
+    parsed = _parse_since("2026-01-15T12:30:00Z")
+    assert parsed == datetime(2026, 1, 15, 12, 30, tzinfo=UTC)
+
+
+def test_parse_since_offset() -> None:
+    parsed = _parse_since("2026-01-15T20:30:00+08:00")
+    assert parsed.utcoffset() is not None
+    assert parsed.astimezone(UTC) == datetime(2026, 1, 15, 12, 30, tzinfo=UTC)
+
+
+def test_parse_since_naive_defaults_to_utc() -> None:
+    parsed = _parse_since("2026-01-15T12:30:00")
+    assert parsed.tzinfo == UTC
+
+
+# ---------------------------------------------------------------------------
+# _row_timestamp
+# ---------------------------------------------------------------------------
+
+
+class _Row:
+    def __init__(self, trade_done_at: object | None) -> None:
+        self.trade_done_at = trade_done_at
+
+
+def test_row_timestamp_attr_datetime_naive_gets_utc() -> None:
+    ts = datetime(2026, 1, 15, 9, 0)
+    assert _row_timestamp(_Row(ts)) == ts.replace(tzinfo=UTC)
+
+
+def test_row_timestamp_attr_datetime_aware_preserved() -> None:
+    ts = datetime(2026, 1, 15, 9, 0, tzinfo=UTC)
+    assert _row_timestamp(_Row(ts)) == ts
+
+
+def test_row_timestamp_attr_iso_string() -> None:
+    assert _row_timestamp(_Row("2026-01-15T09:00:00Z")) == datetime(
+        2026, 1, 15, 9, 0, tzinfo=UTC,
+    )
+
+
+def test_row_timestamp_dict_key() -> None:
+    row = {"trade_done_at": "2026-02-01T00:00:00Z"}
+    assert _row_timestamp(row) == datetime(2026, 2, 1, tzinfo=UTC)
+
+
+def test_row_timestamp_missing_returns_none() -> None:
+    assert _row_timestamp(_Row(None)) is None
+    assert _row_timestamp({}) is None
+
+
+# ---------------------------------------------------------------------------
+# _classify_sdk_error
+# ---------------------------------------------------------------------------
+
+
+class _CodedError(Exception):
+    def __init__(self, message: str, code: object) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class _StatusError(Exception):
+    def __init__(self, message: str, status_code: object) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Rate limit exceeded",
+        "Too many requests, try again later",
+        "Request timeout",
+        "Service temporarily unavailable",
+    ],
+)
+def test_classify_transient_by_message(message: str) -> None:
+    classified = _classify_sdk_error(Exception(message))
+    assert isinstance(classified, TransientError)
+
+
+@pytest.mark.parametrize("code", ["429", "500", "502", "503", "504", "301606"])
+def test_classify_transient_by_code(code: str) -> None:
+    classified = _classify_sdk_error(_CodedError("boom", code))
+    assert isinstance(classified, TransientError)
+
+
+def test_classify_transient_by_status_code() -> None:
+    classified = _classify_sdk_error(_StatusError("boom", 503))
+    assert isinstance(classified, TransientError)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Invalid access token",
+        "Access token expired",
+        "Invalid app key",
+        "wrong app secret",
+        "Unauthorized request",
+        "Forbidden",
+        "Invalid credential",
+    ],
+)
+def test_classify_permanent_by_message(message: str) -> None:
+    classified = _classify_sdk_error(Exception(message))
+    assert isinstance(classified, PermanentError)
+
+
+@pytest.mark.parametrize("code", ["401", "403", "100002", "100004"])
+def test_classify_permanent_by_code(code: str) -> None:
+    classified = _classify_sdk_error(_CodedError("nope", code))
+    assert isinstance(classified, PermanentError)
+
+
+def test_classify_pass_through_when_already_classified() -> None:
+    err = TransientError("already classified")
+    assert _classify_sdk_error(err) is err
+    err2 = PermanentError("already classified")
+    assert _classify_sdk_error(err2) is err2
+
+
+def test_classify_unknown_exception_passes_through() -> None:
+    err = ValueError("something else entirely")
+    assert _classify_sdk_error(err) is err

@@ -5,6 +5,7 @@ import '../local/database/app_database.dart';
 import '../remote/backend_client/backend_client.dart';
 import '../remote/backend_client/backend_exception.dart';
 import 'mappers.dart';
+import 'wrapped_credentials_builder.dart';
 
 /// Repository implementation for the aggregated portfolio snapshot.
 ///
@@ -17,10 +18,14 @@ class PortfolioRepositoryImpl implements PortfolioRepository {
   PortfolioRepositoryImpl({
     required this.db,
     required this.backend,
+    required this.connections,
+    required this.wrappedCredentialsBuilder,
   });
 
   final AppDatabase db;
   final BackendClient backend;
+  final ConnectionsRepository connections;
+  final WrappedCredentialsBuilder wrappedCredentialsBuilder;
 
   final StreamController<PortfolioSnapshot> _ctrl =
       StreamController<PortfolioSnapshot>.broadcast();
@@ -32,8 +37,28 @@ class PortfolioRepositoryImpl implements PortfolioRepository {
   @override
   Future<PortfolioSnapshot> getSnapshot({required String baseCurrency}) async {
     try {
-      final json = await backend.getPortfolioSnapshot(baseCurrency: baseCurrency)
-          as Map<String, dynamic>;
+      final activeConnections = await connections.list();
+      final wrapped = await wrappedCredentialsBuilder.buildForConnections(
+        activeConnections,
+      );
+      final json = await backend.getPortfolioSnapshot(
+        baseCurrency: baseCurrency,
+        wrappedCredsByConnection: wrapped.tokensByConnection,
+        wrappedCredsKeyBytes: wrapped.keyBytes,
+      ) as Map<String, dynamic>;
+      if (wrapped.errorsByConnection.isNotEmpty) {
+        json['sourceHealth'] = <Map<String, dynamic>>[
+          ..._readSourceHealth(json),
+          ...wrapped.errorsByConnection.entries.map(
+            (entry) => <String, dynamic>{
+              'sourceId': entry.key,
+              'status': 'error',
+              'code': 'credential_wrap_failed',
+              'message': entry.value,
+            },
+          ),
+        ];
+      }
       final snap = Mappers.snapshotFromJson(json);
       await _cachePositions(snap);
       _ctrl.add(snap);
@@ -45,7 +70,9 @@ class PortfolioRepositoryImpl implements PortfolioRepository {
   }
 
   @override
-  Stream<PortfolioSnapshot> watchSnapshot({required String baseCurrency}) async* {
+  Stream<PortfolioSnapshot> watchSnapshot({
+    required String baseCurrency,
+  }) async* {
     // Emit cached value first for instant UI.
     yield await _buildSnapshotFromCache(baseCurrency);
     // Fire-and-forget refresh.
@@ -123,5 +150,13 @@ class PortfolioRepositoryImpl implements PortfolioRepository {
       totalBaseValue: total,
       totalUnrealizedPnlBase: pnl,
     );
+  }
+
+  List<Map<String, dynamic>> _readSourceHealth(Map<String, dynamic> payload) {
+    final fromCamel = payload['sourceHealth'];
+    final fromSnake = payload['source_health'];
+    final raw = fromCamel ?? fromSnake;
+    if (raw is! List) return const <Map<String, dynamic>>[];
+    return raw.whereType<Map<String, dynamic>>().toList(growable: false);
   }
 }

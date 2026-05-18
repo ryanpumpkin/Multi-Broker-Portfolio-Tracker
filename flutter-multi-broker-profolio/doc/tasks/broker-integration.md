@@ -105,18 +105,18 @@ independent and can be worked in parallel.
 
 ### Flutter — wire the credentials header
 
-- [ ] Extend `BackendClient` to optionally attach `X-MBP-Creds` on
+- [x] Extend `BackendClient` to optionally attach `X-MBP-Creds` on
   portfolio/positions/transactions/balances calls when the active
   connection is in E2E mode.
-- [ ] Add a `WrappedCredentialsBuilder` service that, given a
+- [x] Add a `WrappedCredentialsBuilder` service that, given a
   `connectionId`, reads the encrypted blob from Firestore + the
   current `credentialKeyProvider`, decrypts to plaintext creds,
   wraps via `E2eCrypto.wrapForBackend`, returns the base64 envelope.
-- [ ] `portfolioRepositoryImpl.getSnapshot()` enumerates the user's
+- [x] `portfolioRepositoryImpl.getSnapshot()` enumerates the user's
   active connections, requests one wrapped token per connection,
   attaches a `Map<connectionId, wrappedToken>` header (or one call
   per connection — pick whichever the aggregator endpoint accepts).
-- [ ] Surface per-connection errors via the existing `SourceHealth`
+- [x] Surface per-connection errors via the existing `SourceHealth`
   field in `PortfolioSnapshot`.
 
 ### UI polish

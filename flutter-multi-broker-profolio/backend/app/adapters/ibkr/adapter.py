@@ -104,13 +104,13 @@ class IBKRClient:
         self._ib: Any | None = ib
 
     def _ensure_ib(self) -> Any:
-        if self._ib is None:
+        if self._ib is None:  # pragma: no cover - exercises real ib_insync import, covered by env-gated integration test
             try:
                 ib_insync_mod = importlib.import_module("ib_insync")
-            except ModuleNotFoundError as exc:  # pragma: no cover - env/setup issue
+            except ModuleNotFoundError as exc:
                 raise PermanentError("ib_insync is not installed") from exc
             ib_cls = getattr(ib_insync_mod, "IB", None)
-            if ib_cls is None:  # pragma: no cover - env/setup issue
+            if ib_cls is None:
                 raise PermanentError("ib_insync is not installed")
             self._ib = ib_cls()
         return self._ib
