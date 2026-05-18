@@ -322,32 +322,158 @@ class ConnectionsScreen extends ConsumerWidget {
     BuildContext context, {
     required bool hasPin,
   }) {
+    if (!hasPin) {
+      // No PIN set yet — nudge the user to Settings to configure one.
+      return showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('PIN required'),
+          content: const Text(
+            'Set up an app PIN first. Open Settings → App Lock to '
+            'configure it. Your PIN is used to encrypt broker '
+            'credentials so the server never sees them in plaintext.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                context.go(AppRoutes.settings);
+              },
+              child: const Text('Go to Settings'),
+            ),
+          ],
+        ),
+      );
+    }
+    // PIN exists but the in-memory key was wiped (lock / restart).
+    // Let the user enter the PIN inline so we can re-derive the key.
     return showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('PIN required'),
-        content: Text(
-          hasPin
-              ? 'Unlock the app with your PIN to encrypt broker credentials, '
-                  'then try again.'
-              : 'Set up an app PIN first. Open Settings → App Lock to '
-                  'configure it. Your PIN is used to encrypt broker '
-                  'credentials so the server never sees them in plaintext.',
+      builder: (_) => const _PinEntryDialog(),
+    );
+  }
+}
+
+class _PinEntryDialog extends ConsumerStatefulWidget {
+  const _PinEntryDialog();
+
+  @override
+  ConsumerState<_PinEntryDialog> createState() => _PinEntryDialogState();
+}
+
+class _PinEntryDialogState extends ConsumerState<_PinEntryDialog> {
+  final _ctrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    final pin = _ctrl.text;
+    try {
+      // Verify the PIN matches the stored hash (we don't want to derive
+      // a key from arbitrary input — wrong PIN would silently produce
+      // a non-decryptable key).
+      final store = ref.read(appLockStoreProvider);
+      final hasher = ref.read(appLockPinHasherProvider);
+      final storedHash = await store.readPinHash();
+      if (storedHash == null) {
+        throw StateError('No PIN configured.');
+      }
+      final attemptHash = await hasher.hash(pin);
+      if (attemptHash != storedHash) {
+        if (!mounted) return;
+        setState(() {
+          _saving = false;
+          _error = 'Wrong PIN. Try again.';
+        });
+        return;
+      }
+      // Derive and cache the credential-encryption key.
+      await ref.read(credentialKeyProvider.notifier).deriveAndCache(pin);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Enter your PIN'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Required to encrypt broker credentials on this device.',
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              key: const Key('credentials_pin_input'),
+              controller: _ctrl,
+              autofocus: true,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'PIN'),
+              onFieldSubmitted: (_) => _submit(),
+              validator: (v) {
+                if (v == null || v.length < 4) return 'PIN is required';
+                return null;
+              },
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              context.go(AppRoutes.settings);
-            },
-            child: const Text('Go to Settings'),
-          ),
-        ],
       ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const Key('credentials_pin_submit'),
+          onPressed: _saving ? null : _submit,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Unlock'),
+        ),
+      ],
     );
   }
 }
