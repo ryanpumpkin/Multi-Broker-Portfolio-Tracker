@@ -210,11 +210,26 @@ class FxService:
         raise FxRateUnavailableError(f"FX rate unavailable for {base_u}/{quote_u}")
 
     async def get_rates_for(self, pairs: Iterable[tuple[str, str]]) -> dict[tuple[str, str], FxRate]:
-        """Batch-resolve rates for multiple pairs."""
+        """Batch-resolve rates for multiple pairs.
+
+        Soft-fails on individual pairs: a pair with no available rate is
+        simply omitted from the returned map. Callers (the portfolio
+        aggregator) already treat a missing rate as "skip this conversion",
+        so a single unsupported currency must not blow up the entire
+        dashboard refresh.
+        """
         wanted = {(b.upper(), q.upper()) for b, q in pairs}
         out: dict[tuple[str, str], FxRate] = {}
         for base, quote in wanted:
-            out[(base, quote)] = await self.get_rate(base, quote)
+            try:
+                out[(base, quote)] = await self.get_rate(base, quote)
+            except FxRateUnavailableError:
+                import logging
+                logging.getLogger("mbp.fx").info(
+                    "get_rates_for: skipping unavailable pair %s/%s",
+                    base,
+                    quote,
+                )
         return out
 
     async def _get_cached(self, base: str, quote: str) -> FxRate | None:
