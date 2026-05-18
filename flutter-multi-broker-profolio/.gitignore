@@ -5,6 +5,10 @@
 .env
 .env.*
 !.env.example
+.secrets/
+**/.secrets/
+*.key
+!**/firestore.rules
 
 # OS
 .DS_Store
