@@ -16,6 +16,7 @@ from app.services.connection_status import (
 )
 from app.services.fx import (
     ExchangerateHostProvider,
+    FrankfurterProvider,
     FxProvider,
     FxService,
     NullFxCacheStore,
@@ -89,8 +90,16 @@ def get_fx_service(settings: Settings | None = None) -> FxService:
             msg = "fx_provider_api_key is required for openexchangerates"
             raise ValueError(msg)
         provider = OpenExchangeRatesProvider(api_key=api_key)
+    elif provider_name in {"exchangerate.host", "exchangeratehost"}:
+        # Requires an API key as of late 2024; if missing, fall through to
+        # Frankfurter so the dashboard still works for personal use.
+        if cfg.fx_provider_api_key:
+            provider = ExchangerateHostProvider(api_key=cfg.fx_provider_api_key)
+        else:
+            provider = FrankfurterProvider()
     else:
-        provider = ExchangerateHostProvider(api_key=cfg.fx_provider_api_key)
+        # Default: Frankfurter (ECB rates, no API key required).
+        provider = FrankfurterProvider()
     return FxService(provider=provider, firestore_cache=NullFxCacheStore())
 
 

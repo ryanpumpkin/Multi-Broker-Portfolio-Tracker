@@ -70,8 +70,44 @@ class InMemoryFxCacheStore:
         self._items[key] = _CacheEntry(rate=rate, expires_at=time.monotonic() + ttl_seconds)
 
 
+class FrankfurterProvider:
+    """ECB-derived FX rates via frankfurter.dev. No API key required.
+
+    Endpoint shape: GET /latest?from=USD&to=HKD returns
+    `{"amount": 1, "base": "USD", "date": "...", "rates": {"HKD": 7.79}}`.
+    """
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None = None,
+        *,
+        base_url: str = "https://api.frankfurter.dev/v1",
+    ) -> None:
+        self._client = client or httpx.AsyncClient(timeout=10.0)
+        self._base_url = base_url.rstrip("/")
+
+    async def fetch_rate(self, base: str, quote: str) -> FxRate | None:
+        response = await self._client.get(
+            f"{self._base_url}/latest",
+            params={"base": base, "symbols": quote},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        rates = payload.get("rates", {}) if isinstance(payload, dict) else {}
+        value = rates.get(quote)
+        if value is None:
+            return None
+        return FxRate(
+            base=base,
+            quote=quote,
+            rate=Decimal(str(value)),
+            as_of=datetime.now(UTC),
+        )
+
+
 class ExchangerateHostProvider:
-    """Default provider backed by exchangerate.host."""
+    """Provider backed by exchangerate.host. Requires an API key as of
+    late 2024 — the free no-key tier was retired."""
 
     def __init__(
         self,
@@ -260,6 +296,7 @@ class FxService:
 
 __all__ = [
     "ExchangerateHostProvider",
+    "FrankfurterProvider",
     "FxCacheStore",
     "FxProvider",
     "FxRateUnavailableError",

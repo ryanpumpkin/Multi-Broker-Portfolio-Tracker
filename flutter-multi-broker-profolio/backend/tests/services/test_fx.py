@@ -41,3 +41,52 @@ async def test_fx_service_triangulates_via_usd_when_direct_pair_missing() -> Non
     # Direct pair was absent; service resolved via EUR/USD and USD/HKD.
     assert ("EUR", "USD") in provider.calls
     assert ("USD", "HKD") in provider.calls
+
+
+# ---------------------------------------------------------------------------
+# FrankfurterProvider
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_frankfurter_provider_parses_rate() -> None:
+    import httpx
+
+    from app.services.fx import FrankfurterProvider
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/latest")
+        assert request.url.params["base"] == "USD"
+        assert request.url.params["symbols"] == "HKD"
+        return httpx.Response(
+            200,
+            json={
+                "amount": 1,
+                "base": "USD",
+                "date": "2026-05-18",
+                "rates": {"HKD": 7.79},
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = FrankfurterProvider(client=client)
+    rate = await provider.fetch_rate("USD", "HKD")
+    assert rate is not None
+    assert rate.rate == Decimal("7.79")
+
+
+@pytest.mark.asyncio
+async def test_frankfurter_provider_returns_none_when_quote_absent() -> None:
+    import httpx
+
+    from app.services.fx import FrankfurterProvider
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"base": "USD", "rates": {"EUR": 0.9}},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = FrankfurterProvider(client=client)
+    rate = await provider.fetch_rate("USD", "HKD")
+    assert rate is None
