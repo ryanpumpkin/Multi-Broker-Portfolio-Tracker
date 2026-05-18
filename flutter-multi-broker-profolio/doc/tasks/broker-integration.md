@@ -57,51 +57,51 @@ independent and can be worked in parallel.
 
 ### Backend — LongBridge
 
-- [ ] Add `longbridge` to `pyproject.toml` (use the latest stable SDK
+- [x] Add `longbridge` to `pyproject.toml` (use the latest stable SDK
   version on PyPI). Pin to `~=` minor.
-- [ ] Implement `LongbridgeClient` (the Protocol's expected wrapper) in
+- [x] Implement `LongbridgeClient` (the Protocol's expected wrapper) in
   `app/adapters/longbridge/client.py`: takes `(appKey, appSecret,
   accessToken)`, instantiates `longbridge.Config` + `QuoteContext` +
   `TradeContext`, exposes async methods `list_positions`,
   `list_balances`, `list_transactions`, `stream_quotes`.
-- [ ] Map LongBridge response shapes to the domain models in
+- [x] Map LongBridge response shapes to the domain models in
   `app/models/domain.py`. Use Decimal where the SDK returns Decimal;
   convert to float only at the API boundary.
-- [ ] Unit tests with a fake `LongbridgeClient` covering happy path,
+- [x] Unit tests with a fake `LongbridgeClient` covering happy path,
   rate-limit retry (use the existing `RetryPolicy`), and credential
   errors → `PermanentError`.
-- [ ] Integration test (skippable in CI) that, if env vars
+- [x] Integration test (skippable in CI) that, if env vars
   `LB_APP_KEY` / `LB_APP_SECRET` / `LB_ACCESS_TOKEN` are present, hits
   the real LongBridge API and asserts at least one balance row.
 
 ### Backend — Binance
 
-- [ ] Add `python-binance` to `pyproject.toml`.
-- [ ] Implement `BinanceClient` wrapper supporting both `binance.com`
+- [x] Add `python-binance` to `pyproject.toml`.
+- [x] Implement `BinanceClient` wrapper supporting both `binance.com`
   and `binance.us` (the existing adapter already takes `BinanceHost`).
   Reject keys that have `canTrade=true` or `canWithdraw=true` on init
   (defence in depth — Binance also enforces this).
-- [ ] Map Binance `account()`, `myTrades()`, `klines()` responses to
+- [x] Map Binance `account()`, `myTrades()`, `klines()` responses to
   domain models. Spot balances only in v1 (no futures, no margin).
-- [ ] Same test shape as LongBridge.
+- [x] Same test shape as LongBridge.
 
 ### Backend — IBKR
 
-- [ ] Add `ib_insync` to `pyproject.toml`.
-- [ ] `IBKRClient` connects via the IBGW sidecar (env vars already in
+- [x] Add `ib_insync` to `pyproject.toml`.
+- [x] `IBKRClient` connects via the IBGW sidecar (env vars already in
   `.env.example`: `MBP_IB_GATEWAY_HOST`, `MBP_IB_GATEWAY_PORT`).
-- [ ] Map `accountSummary()`, `positions()`, `trades()` to domain.
-- [ ] Same test shape.
+- [x] Map `accountSummary()`, `positions()`, `trades()` to domain.
+- [x] Same test shape.
 
 ### Backend — Futu
 
-- [ ] Add `futu-api` to `pyproject.toml`.
-- [ ] `FutuClient` connects to OpenD sidecar; auto-unlocks trade
+- [x] Add `futu-api` to `pyproject.toml`.
+- [x] `FutuClient` connects to OpenD sidecar; auto-unlocks trade
   context per request using the per-call password from the request
   context (never persisted).
-- [ ] Map `position_list_query()`, `accinfo_query()`,
+- [x] Map `position_list_query()`, `accinfo_query()`,
   `history_deal_list_query()` to domain.
-- [ ] Same test shape.
+- [x] Same test shape.
 
 ### Flutter — wire the credentials header
 

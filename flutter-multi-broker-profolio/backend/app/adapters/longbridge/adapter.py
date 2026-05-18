@@ -1,9 +1,8 @@
 """LongBridge OpenAPI adapter.
 
-The official `longbridge` Python SDK is intentionally not declared as a
-runtime dependency. Callers pass any object that satisfies the
-`LongBridgeClient` Protocol — in production a thin wrapper around the SDK;
-in tests, a fake. See detailed-design §4.3.
+Callers pass any object that satisfies the `LongBridgeClient` Protocol —
+in production `app.adapters.longbridge.client.LongbridgeClient`, in tests a
+fake. See detailed-design §4.3.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from typing import Any, Protocol
 
 from app.adapters._common import (
     HealthTracker,
+    PermanentError,
     RetryPolicy,
     TransientError,
     retry_async,
@@ -34,17 +34,31 @@ SOURCE_NAME = "longbridge"
 class LongBridgeClient(Protocol):
     """SDK wrapper boundary. The real impl wraps `longbridge.openapi`."""
 
-    async def fetch_positions(self) -> list[dict[str, Any]]: ...
+    async def list_positions(self) -> list[Any]: ...
 
-    async def fetch_balances(self) -> list[dict[str, Any]]: ...
+    async def list_balances(self) -> list[Any]: ...
 
-    async def fetch_transactions(
-        self, *, since: str | None, limit: int | None
-    ) -> list[dict[str, Any]]: ...
+    async def list_transactions(self, *, since: str | None, limit: int | None) -> list[Any]: ...
 
-    def subscribe_quotes(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]: ...
+    def stream_quotes(self, symbols: list[str]) -> AsyncIterator[Any]: ...
 
-    async def refresh_token(self) -> None: ...
+    async def ping(self) -> bool: ...
+
+
+def _lookup(raw: Any, *keys: str) -> Any:
+    for key in keys:
+        if isinstance(raw, dict) and key in raw:
+            return raw[key]
+        if hasattr(raw, key):
+            return getattr(raw, key)
+    return None
+
+
+def _opt_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _dec(value: Any) -> Decimal:
@@ -57,64 +71,146 @@ def _opt_dec(value: Any) -> Decimal | None:
     return Decimal(str(value))
 
 
-def _map_position(raw: dict[str, Any]) -> Position:
-    qty = _dec(raw["quantity"])
-    avg = _opt_dec(raw.get("cost_price"))
-    last = _opt_dec(raw.get("last_price"))
-    mv = last * qty if last is not None else None
-    upl = (last - avg) * qty if last is not None and avg is not None else None
+def _map_position(raw: Any) -> Position:
+    symbol = _lookup(raw, "symbol")
+    if symbol is None:
+        raise PermanentError("longbridge position missing symbol")
+    quantity = _lookup(raw, "quantity")
+    if quantity is None:
+        raise PermanentError("longbridge position missing quantity")
+    currency = _lookup(raw, "currency")
+    if currency is None:
+        raise PermanentError("longbridge position missing currency")
+
+    qty = _dec(quantity)
+    avg = _opt_dec(_lookup(raw, "cost_price", "avg_cost"))
+    last = _opt_dec(_lookup(raw, "last_price", "last_done", "price"))
+    mv_raw = _lookup(raw, "market_value")
+    upl_raw = _lookup(raw, "unrealized_pnl")
+    mv = _opt_dec(mv_raw) if mv_raw is not None else (last * qty if last is not None else None)
+    upl = (
+        _opt_dec(upl_raw)
+        if upl_raw is not None
+        else ((last - avg) * qty if last is not None and avg is not None else None)
+    )
+
+    exchange = _lookup(raw, "market", "exchange")
+    if exchange is not None:
+        exchange = str(exchange)
+
     return Position(
         source=SOURCE_NAME,
-        account_id=raw.get("account_no"),
-        symbol=raw["symbol"],
-        exchange=raw.get("market") or raw.get("exchange"),
+        account_id=_opt_str(_lookup(raw, "account_no", "account_id", "account_channel")),
+        symbol=str(symbol),
+        exchange=exchange,
         quantity=qty,
         avg_cost=avg,
         last_price=last,
-        currency=raw["currency"],
+        currency=str(currency),
         market_value=mv,
         unrealized_pnl=upl,
     )
 
 
-def _map_balance(raw: dict[str, Any]) -> CashBalance:
+def _map_balance(raw: Any) -> CashBalance:
+    currency = _lookup(raw, "currency")
+    if currency is None:
+        raise PermanentError("longbridge balance missing currency")
+    amount = _lookup(raw, "total_cash", "withdraw_cash", "available_cash", "cash", "amount")
+    if amount is None:
+        raise PermanentError("longbridge balance missing amount")
     return CashBalance(
         source=SOURCE_NAME,
-        account_id=raw.get("account_no"),
-        currency=raw["currency"],
-        amount=_dec(raw["total_cash"]),
+        account_id=_opt_str(_lookup(raw, "account_no", "account_id", "account_channel")),
+        currency=str(currency),
+        amount=_dec(amount),
     )
 
 
 def _parse_ts(value: Any) -> datetime:
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if isinstance(value, int | float):
+        ts = float(value)
+        if ts > 1e12:
+            ts /= 1000.0
+        return datetime.fromtimestamp(ts, tz=UTC)
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-def _map_transaction(raw: dict[str, Any]) -> Transaction:
+def _map_transaction(raw: Any) -> Transaction:
+    txid = _lookup(raw, "order_id", "trade_id", "transaction_id")
+    if txid is None:
+        raise PermanentError("longbridge transaction missing id")
+    side_raw = _lookup(raw, "side")
+    side = str(side_raw).lower() if side_raw is not None else None
+    timestamp = _lookup(raw, "submitted_at", "trade_done_at", "timestamp")
+    if timestamp is None:
+        raise PermanentError("longbridge transaction missing timestamp")
     return Transaction(
         source=SOURCE_NAME,
-        account_id=raw.get("account_no"),
-        transaction_id=str(raw["order_id"]),
-        symbol=raw.get("symbol"),
-        side=(raw.get("side") or "").lower() or None,
-        quantity=_opt_dec(raw.get("quantity")),
-        price=_opt_dec(raw.get("price")),
-        currency=raw.get("currency"),
-        amount=_opt_dec(raw.get("amount")),
-        timestamp=_parse_ts(raw["submitted_at"]),
+        account_id=_opt_str(_lookup(raw, "account_no", "account_id", "account_channel")),
+        transaction_id=str(txid),
+        symbol=_opt_str(_lookup(raw, "symbol")),
+        side=side,
+        quantity=_opt_dec(_lookup(raw, "quantity", "executed_quantity")),
+        price=_opt_dec(_lookup(raw, "price", "executed_price")),
+        currency=_opt_str(_lookup(raw, "currency")),
+        amount=_opt_dec(_lookup(raw, "amount", "executed_amount")),
+        timestamp=_parse_ts(timestamp),
     )
 
 
-def _map_quote(raw: dict[str, Any]) -> Quote:
+def _map_quote(raw: Any) -> Quote:
+    symbol = _lookup(raw, "symbol")
+    if symbol is None:
+        raise PermanentError("longbridge quote missing symbol")
+    price = _lookup(raw, "last_done", "last_price", "price")
+    if price is None:
+        raise PermanentError("longbridge quote missing price")
+    currency = _lookup(raw, "currency")
+    if currency is None:
+        currency = "USD"
+    ts_raw = _lookup(raw, "timestamp", "trade_done_at", "updated_at")
     return Quote(
         source=SOURCE_NAME,
-        symbol=raw["symbol"],
-        price=_dec(raw["last_done"]),
-        currency=raw["currency"],
-        timestamp=_parse_ts(raw["timestamp"]),
+        symbol=str(symbol),
+        price=_dec(price),
+        currency=str(currency),
+        timestamp=_parse_ts(ts_raw) if ts_raw is not None else datetime.now(UTC),
     )
+
+
+def _classify_error(exc: Exception) -> Exception:
+    if isinstance(exc, (TransientError, PermanentError)):
+        return exc
+
+    message = str(exc).lower()
+    code_raw = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    code = str(code_raw).lower() if code_raw is not None else ""
+
+    if (
+        "rate limit" in message
+        or "too many request" in message
+        or "timed out" in message
+        or "timeout" in message
+        or code in {"429", "301606", "500", "502", "503", "504"}
+    ):
+        return TransientError(str(exc))
+
+    if (
+        "invalid access token" in message
+        or "access token" in message
+        or "app key" in message
+        or "app secret" in message
+        or "unauthorized" in message
+        or "forbidden" in message
+        or "credential" in message
+        or code in {"401", "403", "100002", "100004"}
+    ):
+        return PermanentError(str(exc))
+
+    return exc
 
 
 class LongBridgeAdapter(SourceAdapter):
@@ -134,8 +230,14 @@ class LongBridgeAdapter(SourceAdapter):
         self._health = health or HealthTracker(source=SOURCE_NAME)
 
     async def _call(self, func: Any) -> Any:
+        async def _wrapped() -> Any:
+            try:
+                return await func()
+            except Exception as exc:  # noqa: BLE001 - normalized below
+                raise _classify_error(exc) from exc
+
         try:
-            result = await retry_async(func, policy=self._retry)
+            result = await retry_async(_wrapped, policy=self._retry)
         except Exception as exc:
             self._health.record_failure(str(exc))
             raise
@@ -143,11 +245,11 @@ class LongBridgeAdapter(SourceAdapter):
         return result
 
     async def list_positions(self) -> list[Position]:
-        raw = await self._call(self._client.fetch_positions)
+        raw = await self._call(self._client.list_positions)
         return [_map_position(item) for item in raw]
 
     async def list_balances(self) -> list[CashBalance]:
-        raw = await self._call(self._client.fetch_balances)
+        raw = await self._call(self._client.list_balances)
         return [_map_balance(item) for item in raw]
 
     async def list_transactions(
@@ -156,20 +258,23 @@ class LongBridgeAdapter(SourceAdapter):
         since: str | None = None,
         limit: int | None = None,
     ) -> list[Transaction]:
-        async def _do() -> list[dict[str, Any]]:
-            return await self._client.fetch_transactions(since=since, limit=limit)
+        async def _do() -> list[Any]:
+            return await self._client.list_transactions(since=since, limit=limit)
 
         raw = await self._call(_do)
         return [_map_transaction(item) for item in raw]
 
     async def stream_quotes(self, symbols: Iterable[str]) -> AsyncIterator[Quote]:
-        async for raw in self._client.subscribe_quotes(list(symbols)):
+        async for raw in self._client.stream_quotes(list(symbols)):
             yield _map_quote(raw)
 
     async def healthcheck(self) -> SourceHealth:
         try:
-            await self._client.refresh_token()
-            self._health.record_success()
+            ok = await self._client.ping()
+            if ok:
+                self._health.record_success()
+            else:
+                self._health.record_failure("longbridge health probe failed")
         except Exception as exc:  # noqa: BLE001 - health probe records and continues
             self._health.record_failure(str(exc))
         return self._health.snapshot()
