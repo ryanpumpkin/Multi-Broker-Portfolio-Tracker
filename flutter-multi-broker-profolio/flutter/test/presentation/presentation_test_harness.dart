@@ -2,7 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:multi_broker_portfolio/app_lock/app_lock.dart';
+import 'package:multi_broker_portfolio/data/crypto/e2e.dart';
 import 'package:multi_broker_portfolio/domain/domain.dart';
+import 'package:multi_broker_portfolio/state/app_lock_provider.dart';
+import 'package:multi_broker_portfolio/state/credential_key_provider.dart';
 import 'package:multi_broker_portfolio/state/repository_providers.dart';
 
 List<Override> buildPresentationTestOverrides() {
@@ -20,6 +24,36 @@ List<Override> buildPresentationTestOverrides() {
         .overrideWithValue(_FakeManualHoldingsRepository()),
     fxRepositoryProvider.overrideWithValue(_FakeFxRepository()),
   ];
+}
+
+/// Overrides that bypass the credential-encryption gate so widget tests
+/// can open the Add Connection dialog without setting up app-lock first.
+/// Apply via the optional `overrides` parameter of [wrapForTest].
+List<Override> buildAppLockUnlockedOverrides() {
+  return [
+    appLockProvider.overrideWith(_FakeAppLockController.new),
+    credentialKeyProvider
+        .overrideWith(_FakeCredentialKeyController.new),
+  ];
+}
+
+class _FakeAppLockController extends AppLockController {
+  @override
+  Future<AppLockState> build() async {
+    return const AppLockState(
+      isEnabled: false,
+      biometricEnabled: false,
+      timeout: Duration(seconds: 30),
+      isLocked: false,
+      hasPin: true,
+      failedAttempts: 0,
+    );
+  }
+}
+
+class _FakeCredentialKeyController extends CredentialKeyController {
+  @override
+  E2eKey? build() => E2eKey(List<int>.filled(32, 0));
 }
 
 Widget wrapForTest(
@@ -147,6 +181,10 @@ class _FakeConnectionsRepository implements ConnectionsRepository {
     _connections.add(connection);
     return connection;
   }
+
+  @override
+  Future<void> setCredentials(String connectionId, String encryptedBlob) async {}
+
 
   @override
   Future<List<Connection>> list() async =>

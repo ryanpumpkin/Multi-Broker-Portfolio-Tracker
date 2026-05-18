@@ -1,12 +1,42 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../data/crypto/e2e.dart';
 import '../../../domain/domain.dart';
 import '../../../router/app_router.dart';
 import '../../../state/state.dart';
 import '../../widgets/widgets.dart';
 import '../shared/presentation_scaffold.dart';
+
+/// Per-broker credential field definitions. Each entry is
+/// (jsonKey, displayLabel, obscure).
+const Map<ConnectionKind, List<(String, String, bool)>> _credentialFields = {
+  ConnectionKind.longbridge: [
+    ('appKey', 'App Key', false),
+    ('appSecret', 'App Secret', true),
+    ('accessToken', 'Access Token', true),
+  ],
+  ConnectionKind.ibkr: [
+    ('username', 'Username', false),
+    ('password', 'Password', true),
+    ('tradingMode', 'Trading Mode (paper/live)', false),
+  ],
+  ConnectionKind.futu: [
+    ('account', 'Account', false),
+    ('password', 'Password', true),
+    ('host', 'OpenD Host', false),
+    ('port', 'OpenD Port', false),
+  ],
+  ConnectionKind.binance: [
+    ('apiKey', 'API Key', false),
+    ('apiSecret', 'API Secret', true),
+    ('region', 'Region (com / us)', false),
+  ],
+  ConnectionKind.manual: [],
+};
 
 class ConnectionsScreen extends ConsumerWidget {
   const ConnectionsScreen({super.key});
@@ -93,74 +123,129 @@ class ConnectionsScreen extends ConsumerWidget {
   }
 
   Future<void> _showAddDialog(BuildContext context, WidgetRef ref) async {
+    // Encryption gate: E2E mode requires the user's PIN-derived key.
+    // If app-lock isn't set up yet, nudge them to Settings first.
+    final lock = await ref.read(appLockProvider.future);
+    final hasPin = lock.hasPin;
+    final hasKey = ref.read(credentialKeyProvider) != null;
+    if (!context.mounted) return;
+    if (!hasPin || !hasKey) {
+      await _showPinRequiredDialog(context, hasPin: hasPin);
+      return;
+    }
+
     final formKey = GlobalKey<FormState>();
     var kind = ConnectionKind.longbridge;
     var mode = CredentialMode.e2e;
     final label = TextEditingController();
+    final credCtrls = <String, TextEditingController>{};
+
+    TextEditingController ctrlFor(String key) =>
+        credCtrls.putIfAbsent(key, TextEditingController.new);
 
     await showDialog<void>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
+            final fields = _credentialFields[kind] ?? const [];
             return AlertDialog(
               title: const Text('Add connection'),
-              content: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<ConnectionKind>(
-                      key: const Key('connection_kind_picker'),
-                      initialValue: kind,
-                      items: ConnectionKind.values
-                          .where((k) => k != ConnectionKind.manual)
-                          .map(
-                            (k) => DropdownMenuItem(
-                              value: k,
-                              child: Text(k.name),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DropdownButtonFormField<ConnectionKind>(
+                          key: const Key('connection_kind_picker'),
+                          initialValue: kind,
+                          items: ConnectionKind.values
+                              .where((k) => k != ConnectionKind.manual)
+                              .map(
+                                (k) => DropdownMenuItem(
+                                  value: k,
+                                  child: Text(k.name),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => kind = value);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          key: const Key('connection_label_input'),
+                          controller: label,
+                          decoration: const InputDecoration(
+                            labelText: 'Display label',
+                          ),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Label is required';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<CredentialMode>(
+                          initialValue: mode,
+                          items: const [
+                            DropdownMenuItem(
+                              value: CredentialMode.e2e,
+                              child: Text('E2E'),
                             ),
-                          )
-                          .toList(growable: false),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() => kind = value);
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    TextFormField(
-                      key: const Key('connection_label_input'),
-                      controller: label,
-                      decoration:
-                          const InputDecoration(labelText: 'Display label'),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Label is required';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<CredentialMode>(
-                      initialValue: mode,
-                      items: const [
-                        DropdownMenuItem(
-                          value: CredentialMode.e2e,
-                          child: Text('E2E'),
+                            DropdownMenuItem(
+                              value: CredentialMode.serverKey,
+                              child: Text('Server key'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => mode = value);
+                            }
+                          },
                         ),
-                        DropdownMenuItem(
-                          value: CredentialMode.serverKey,
-                          child: Text('Server key'),
-                        ),
+                        if (fields.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            'Credentials',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Encrypted on this device with your PIN before '
+                            'leaving the app.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 8),
+                          ...fields.map((f) {
+                            final (key, lbl, obscure) = f;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: TextFormField(
+                                key: Key('cred_field_$key'),
+                                controller: ctrlFor(key),
+                                obscureText: obscure,
+                                decoration: InputDecoration(labelText: lbl),
+                                validator: (value) {
+                                  if (value == null || value.trim().isEmpty) {
+                                    return '$lbl is required';
+                                  }
+                                  return null;
+                                },
+                              ),
+                            );
+                          }),
+                        ],
                       ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() => mode = value);
-                        }
-                      },
                     ),
-                  ],
+                  ),
                 ),
               ),
               actions: [
@@ -175,15 +260,41 @@ class ConnectionsScreen extends ConsumerWidget {
                     final messenger = ScaffoldMessenger.of(context);
                     final navigator = Navigator.of(context);
                     try {
+                      final id =
+                          'conn-${DateTime.now().millisecondsSinceEpoch}';
                       await ref.read(connectionsProvider.notifier).add(
                             Connection(
-                              id: 'conn-${DateTime.now().millisecondsSinceEpoch}',
+                              id: id,
                               kind: kind,
                               label: label.text.trim(),
                               status: ConnectionStatus.unknown,
                               credentialMode: mode,
                             ),
                           );
+
+                      // Encrypt and persist credentials if any were provided.
+                      if (fields.isNotEmpty) {
+                        final creds = <String, String>{
+                          for (final (key, _, _) in fields)
+                            key: credCtrls[key]?.text.trim() ?? '',
+                        };
+                        final key = ref.read(credentialKeyProvider);
+                        if (key == null) {
+                          throw StateError(
+                            'Credential key missing. Unlock with your PIN '
+                            'and try again.',
+                          );
+                        }
+                        final ct = await E2eCrypto.production()
+                            .encrypt(jsonEncode(creds), key);
+                        final blob = base64Encode(
+                          utf8.encode(jsonEncode(ct.toEncoded())),
+                        );
+                        await ref
+                            .read(connectionsProvider.notifier)
+                            .setCredentials(id, blob);
+                      }
+
                       if (!context.mounted) return;
                       navigator.pop();
                     } catch (e) {
@@ -199,6 +310,44 @@ class ConnectionsScreen extends ConsumerWidget {
           },
         );
       },
+    );
+
+    for (final c in credCtrls.values) {
+      c.dispose();
+    }
+    label.dispose();
+  }
+
+  Future<void> _showPinRequiredDialog(
+    BuildContext context, {
+    required bool hasPin,
+  }) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('PIN required'),
+        content: Text(
+          hasPin
+              ? 'Unlock the app with your PIN to encrypt broker credentials, '
+                  'then try again.'
+              : 'Set up an app PIN first. Open Settings → App Lock to '
+                  'configure it. Your PIN is used to encrypt broker '
+                  'credentials so the server never sees them in plaintext.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              context.go(AppRoutes.settings);
+            },
+            child: const Text('Go to Settings'),
+          ),
+        ],
+      ),
     );
   }
 }

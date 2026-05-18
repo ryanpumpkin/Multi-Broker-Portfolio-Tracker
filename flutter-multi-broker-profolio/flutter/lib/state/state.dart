@@ -5,6 +5,7 @@ export 'alerts_provider.dart';
 export 'app_lock_provider.dart';
 export 'auth_provider.dart';
 export 'connections_provider.dart';
+export 'credential_key_provider.dart';
 export 'fx_provider.dart';
 export 'manual_holdings_provider.dart';
 export 'notifications_provider.dart';

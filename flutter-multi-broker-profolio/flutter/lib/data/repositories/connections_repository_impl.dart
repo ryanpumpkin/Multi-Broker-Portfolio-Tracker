@@ -60,6 +60,13 @@ class ConnectionsRepositoryImpl implements ConnectionsRepository {
   }
 
   @override
+  Future<void> setCredentials(String connectionId, String encryptedBlob) async {
+    await firestore.upsertConnection(userId, connectionId, <String, dynamic>{
+      'encryptedBlob': encryptedBlob,
+    });
+  }
+
+  @override
   Future<void> remove(String connectionId) async {
     await firestore.deleteConnection(userId, connectionId);
     await db.deleteConnection(connectionId);

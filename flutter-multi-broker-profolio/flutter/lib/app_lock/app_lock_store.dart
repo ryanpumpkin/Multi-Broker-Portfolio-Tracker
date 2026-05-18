@@ -8,6 +8,12 @@ abstract class AppLockStore {
   Future<String?> readPinHash();
   Future<void> writePinHash(String hash);
   Future<void> clearPinHash();
+
+  /// Per-user salt used to derive the E2E credential-encryption key from
+  /// the PIN. Returns base64url-encoded bytes, or null if no salt is
+  /// stored yet. Generated once on first PIN setup and never rotated.
+  Future<String?> readSalt();
+  Future<void> writeSalt(String saltB64);
 }
 
 class SecureAppLockStore implements AppLockStore {
@@ -23,6 +29,7 @@ class SecureAppLockStore implements AppLockStore {
   static const _kBiometricEnabled = 'app_lock.biometric_enabled';
   static const _kTimeoutSeconds = 'app_lock.timeout_seconds';
   static const _kPinHash = 'app_lock.pin_hash';
+  static const _kSalt = 'app_lock.salt';
 
   @override
   Future<AppLockSettings> readSettings() async {
@@ -62,6 +69,13 @@ class SecureAppLockStore implements AppLockStore {
 
   @override
   Future<void> clearPinHash() => _storage.delete(key: _kPinHash);
+
+  @override
+  Future<String?> readSalt() => _storage.read(key: _kSalt);
+
+  @override
+  Future<void> writeSalt(String saltB64) =>
+      _storage.write(key: _kSalt, value: saltB64);
 }
 
 class InMemoryAppLockStore implements AppLockStore {
@@ -71,6 +85,7 @@ class InMemoryAppLockStore implements AppLockStore {
     timeout: Duration(seconds: 30),
   );
   String? _pinHash;
+  String? _salt;
 
   @override
   Future<void> clearPinHash() async {
@@ -91,5 +106,13 @@ class InMemoryAppLockStore implements AppLockStore {
   @override
   Future<void> writeSettings(AppLockSettings settings) async {
     _settings = settings;
+  }
+
+  @override
+  Future<String?> readSalt() async => _salt;
+
+  @override
+  Future<void> writeSalt(String saltB64) async {
+    _salt = saltB64;
   }
 }

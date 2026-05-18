@@ -48,7 +48,10 @@ void main() {
   });
 
   testWidgets('connections screen can open add dialog', (tester) async {
-    await tester.pumpWidget(wrapForTest(const ConnectionsScreen()));
+    await tester.pumpWidget(wrapForTest(
+      const ConnectionsScreen(),
+      overrides: buildAppLockUnlockedOverrides(),
+    ));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('connections_add_button')));

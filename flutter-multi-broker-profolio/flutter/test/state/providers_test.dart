@@ -565,36 +565,11 @@ void main() {
     });
   });
 
-  group('repository provider defaults', () {
-    test('throw UnimplementedError when not overridden (non-auth repos)', () {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
-
-      final providers = <ProviderListenable<Object?>>[
-        settingsRepositoryProvider,
-        connectionsRepositoryProvider,
-        portfolioRepositoryProvider,
-        quotesRepositoryProvider,
-        transactionsRepositoryProvider,
-        alertsRepositoryProvider,
-        manualHoldingsRepositoryProvider,
-        fxRepositoryProvider,
-      ];
-
-      for (final provider in providers) {
-        expect(
-          () => container.read(provider),
-          throwsA(
-            isA<UnimplementedError>().having(
-              (e) => e.message,
-              'message',
-              contains('is not bound'),
-            ),
-          ),
-        );
-      }
-    });
-  });
+  // Repository providers used to throw UnimplementedError stubs that the
+  // caller had to override. They're now wired to real implementations
+  // (SettingsRepositoryImpl, ConnectionsRepositoryImpl, etc.) that depend
+  // on Firebase + Drift, so this group is obsolete. End-to-end wiring is
+  // covered by presentation_smoke_test.dart and manual smoke tests.
 }
 
 class _FakeAuthRepository implements AuthRepository {
@@ -712,6 +687,9 @@ class _FakeConnectionsRepository implements ConnectionsRepository {
     _items.add(connection);
     return connection;
   }
+
+  @override
+  Future<void> setCredentials(String connectionId, String encryptedBlob) async {}
 
   @override
   Future<void> remove(String connectionId) async {

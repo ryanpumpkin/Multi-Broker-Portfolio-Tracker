@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app_lock/app_lock.dart';
+import 'credential_key_provider.dart';
 
 final appLockStoreProvider = Provider<AppLockStore>(
   (ref) => SecureAppLockStore(),
@@ -136,6 +137,11 @@ class AppLockController extends AsyncNotifier<AppLockState> {
     await _store.writePinHash(hash);
     final current = await future;
     state = AsyncData(current.copyWith(hasPin: true));
+    // Eagerly derive the credential-encryption key so the user can add
+    // connections immediately after setting their PIN, without locking
+    // and re-entering it.
+    // ignore: unawaited_futures
+    ref.read(credentialKeyProvider.notifier).deriveAndCache(pin);
   }
 
   Future<bool> unlockWithPin(String pin) async {
@@ -156,6 +162,11 @@ class AppLockController extends AsyncNotifier<AppLockState> {
           backoffUntil: null,
         ),
       );
+      // Derive the credential-encryption key from the PIN. Fire-and-forget;
+      // the dialog flow that needs it awaits credentialKeyProvider before
+      // attempting to encrypt anything.
+      // ignore: unawaited_futures
+      ref.read(credentialKeyProvider.notifier).deriveAndCache(pin);
       return true;
     }
     state = AsyncData(_withFailedAttempt(current));

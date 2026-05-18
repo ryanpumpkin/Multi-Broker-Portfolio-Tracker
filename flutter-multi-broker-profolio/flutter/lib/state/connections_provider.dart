@@ -86,6 +86,15 @@ class ConnectionsController extends AsyncNotifier<ConnectionsState> {
     return created;
   }
 
+  Future<void> setCredentials(
+    String connectionId,
+    String encryptedBlob,
+  ) async {
+    await ref
+        .read(connectionsRepositoryProvider)
+        .setCredentials(connectionId, encryptedBlob);
+  }
+
   Future<void> remove(String connectionId) async {
     await ref.read(connectionsRepositoryProvider).remove(connectionId);
     await _reloadQuietly();
