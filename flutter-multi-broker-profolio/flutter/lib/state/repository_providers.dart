@@ -135,8 +135,20 @@ final portfolioRepositoryProvider = Provider<PortfolioRepository>((ref) {
 
 final quotesRepositoryProvider = Provider<QuotesRepository>((ref) {
   final backend = ref.watch(backendClientProvider);
+  final connections = ref.watch(connectionsRepositoryProvider);
+  final wrappedBuilder = ref.watch(wrappedCredentialsBuilderProvider);
   return QuotesRepositoryImpl(
-    streamFactory: () => QuotesStream(client: backend),
+    streamFactory: () => QuotesStream(
+      client: backend,
+      handshakeProvider: () async {
+        final allConnections = await connections.list();
+        final wrapped = await wrappedBuilder.buildForConnections(allConnections);
+        return QuotesHandshake(
+          wrappedCredsByConnection: wrapped.tokensByConnection,
+          wrappedCredsKeyBytes: wrapped.keyBytes,
+        );
+      },
+    ),
   );
 });
 

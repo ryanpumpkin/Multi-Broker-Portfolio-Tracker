@@ -69,6 +69,10 @@ class _FakeIb:
         self._tickers = tickers or []
         self._tickers_raises = tickers_raises
         self.connect_calls: list[tuple[Any, ...]] = []
+        self.pendingTickersEvent = _Event()
+        self.req_mkt_data_calls: list[Any] = []
+        self.cancel_mkt_data_calls: list[Any] = []
+        self._pushed_once = False
 
     def isConnected(self) -> bool:  # noqa: N802 - ib_insync API name
         return self._connected
@@ -96,6 +100,40 @@ class _FakeIb:
         if self._tickers_raises is not None:
             raise self._tickers_raises
         return self._tickers
+
+    def reqMktData(self, contract: Any, *_args: Any) -> None:  # noqa: N802 - SDK API
+        if self._tickers_raises is not None:
+            raise self._tickers_raises
+        self.req_mkt_data_calls.append(contract)
+
+    def cancelMktData(self, contract: Any) -> None:  # noqa: N802 - SDK API
+        self.cancel_mkt_data_calls.append(contract)
+
+    def waitOnUpdate(self, timeout: float | None = None) -> bool:  # noqa: N802 - SDK API
+        _ = timeout
+        if self._pushed_once:
+            return False
+        self._pushed_once = True
+        if self._tickers:
+            self.pendingTickersEvent.fire(self._tickers)
+        return True
+
+
+class _Event:
+    def __init__(self) -> None:
+        self._handlers: list[Any] = []
+
+    def __iadd__(self, handler: Any) -> _Event:
+        self._handlers.append(handler)
+        return self
+
+    def __isub__(self, handler: Any) -> _Event:
+        self._handlers = [item for item in self._handlers if item is not handler]
+        return self
+
+    def fire(self, payload: list[Any]) -> None:
+        for handler in list(self._handlers):
+            handler(payload)
 
 
 class _Obj:
@@ -419,10 +457,12 @@ async def test_stream_market_data_yields_quotes(stub_ib_insync: None) -> None:
 
     ib = _FakeIb(tickers=[_Ticker("AAPL", 200.0), _NanTicker("TSLA", 0.0)])
     client = IBKRClient(ib=ib)
-    out = [q async for q in client.stream_market_data(["AAPL", "TSLA"])]
-    assert len(out) == 1
-    assert out[0]["symbol"] == "AAPL"
-    assert out[0]["price"] == "200.0"
+    gen = client.stream_market_data(["AAPL", "TSLA"])
+    first = await anext(gen)
+    assert first["symbol"] == "AAPL"
+    assert first["price"] == "200.0"
+    await gen.aclose()
+    assert ib.req_mkt_data_calls
 
 
 @pytest.mark.asyncio
@@ -430,5 +470,5 @@ async def test_stream_market_data_classifies_errors(stub_ib_insync: None) -> Non
     ib = _FakeIb(tickers_raises=Exception("rate limit"))
     client = IBKRClient(ib=ib)
     with pytest.raises(TransientError):
-        async for _ in client.stream_market_data(["AAPL"]):
-            pass
+        gen = client.stream_market_data(["AAPL"])
+        await anext(gen)

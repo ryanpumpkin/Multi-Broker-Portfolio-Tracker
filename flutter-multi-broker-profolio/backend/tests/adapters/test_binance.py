@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import sys
+import types
 from collections.abc import AsyncIterator
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -281,6 +283,49 @@ def test_httpx_client_parses_iso_since_to_ms() -> None:
     parsed = HttpxBinanceClient._to_int_ms("2026-05-19T00:00:00Z")
     assert parsed is not None
     assert parsed > 0
+
+
+@pytest.mark.asyncio
+async def test_httpx_client_stream_mini_tickers_uses_trade_streams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeSocket:
+        async def __aenter__(self) -> _FakeSocket:
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: Any,
+            exc: Any,
+            tb: Any,
+        ) -> None:
+            _ = (exc_type, exc, tb)
+
+        async def recv(self) -> dict[str, Any]:
+            return {"data": {"s": "BTCUSDT", "p": "100", "E": 1700000000000}}
+
+    class _FakeBsm:
+        def __init__(self, _sdk: Any) -> None:
+            self.streams: list[str] = []
+
+        def multiplex_socket(self, streams: list[str]) -> _FakeSocket:
+            self.streams = streams
+            return _FakeSocket()
+
+    streams_mod = types.ModuleType("binance.streams")
+    streams_mod.BinanceSocketManager = _FakeBsm  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "binance.streams", streams_mod)
+
+    client = HttpxBinanceClient(
+        BinanceCredentials(api_key="k", api_secret="s"),
+        host=BinanceHost.COM,
+    )
+    client._sdk = cast(Any, object())  # type: ignore[attr-defined]
+
+    gen = client.stream_mini_tickers(["BTCUSDT"])
+    first = await anext(gen)
+    assert first["s"] == "BTCUSDT"
+    await gen.aclose()
 
 
 @pytest.mark.asyncio

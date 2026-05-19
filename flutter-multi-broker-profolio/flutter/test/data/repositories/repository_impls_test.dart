@@ -653,6 +653,9 @@ class _FakeQuotesStream implements QuotesStream {
       _backendFromMock((_) async => http.Response('', 200));
 
   @override
+  QuotesHandshakeProvider? get handshakeProvider => null;
+
+  @override
   Future<void> dispose() async {
     disposed = true;
     await _ctrl.close();

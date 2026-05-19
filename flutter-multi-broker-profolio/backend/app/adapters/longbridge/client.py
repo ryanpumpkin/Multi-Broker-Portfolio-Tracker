@@ -204,22 +204,62 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         if not symbols:
             return
 
-        while True:
-            quotes = await _to_thread(self._quote_ctx.quote, symbols)
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        push_wired = False
+
+        def _enqueue_quote(row: Any) -> None:
             now = datetime.now(UTC)
-            for quote in quotes:
-                if isinstance(quote, dict):
-                    payload = dict(quote)
-                else:
-                    payload = {
-                        "symbol": getattr(quote, "symbol", None),
-                        "last_done": getattr(quote, "last_done", None),
-                        "currency": getattr(quote, "currency", None),
-                        "timestamp": getattr(quote, "timestamp", now),
-                    }
-                payload.setdefault("timestamp", now)
-                yield payload
-            await asyncio.sleep(self._quote_poll_interval)
+            if isinstance(row, dict):
+                payload = dict(row)
+            else:
+                payload = {
+                    "symbol": getattr(row, "symbol", None),
+                    "last_done": getattr(row, "last_done", None),
+                    "currency": getattr(row, "currency", None),
+                    "timestamp": getattr(row, "timestamp", now),
+                }
+            payload.setdefault("timestamp", now)
+            loop.call_soon_threadsafe(queue.put_nowait, payload)
+
+        subscribe_fn = getattr(self._quote_ctx, "subscribe", None)
+        set_handler = getattr(self._quote_ctx, "set_on_quote", None)
+        if callable(subscribe_fn) and callable(set_handler):
+            subtype_value: Any = None
+            sdk_subtype = getattr(importlib.import_module("longbridge.openapi"), "SubType", None)
+            if sdk_subtype is not None:
+                subtype_value = (
+                    getattr(sdk_subtype, "Quote", None)
+                    or getattr(sdk_subtype, "QUOTE", None)
+                )
+
+            def on_quote(rows: Any) -> None:
+                for row in rows:
+                    _enqueue_quote(row)
+
+            await _to_thread(set_handler, on_quote)
+            if subtype_value is not None:
+                await _to_thread(subscribe_fn, symbols, [subtype_value])
+            else:
+                await _to_thread(subscribe_fn, symbols)
+            push_wired = True
+
+        # Prime with a snapshot so callers don't wait for next market event.
+        quotes = await _to_thread(self._quote_ctx.quote, symbols)
+        for quote in quotes:
+            _enqueue_quote(quote)
+
+        if push_wired:
+            while True:
+                yield await queue.get()
+        else:
+            while True:
+                quotes = await _to_thread(self._quote_ctx.quote, symbols)
+                for quote in quotes:
+                    _enqueue_quote(quote)
+                while not queue.empty():
+                    yield await queue.get()
+                await asyncio.sleep(self._quote_poll_interval)
 
 
 def _position_to_dict(raw: Any) -> dict[str, Any]:

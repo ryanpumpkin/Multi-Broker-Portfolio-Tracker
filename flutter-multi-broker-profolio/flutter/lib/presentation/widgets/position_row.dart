@@ -7,6 +7,7 @@ import 'pnl_badge.dart';
 class PositionRow extends StatelessWidget {
   const PositionRow({
     required this.position,
+    this.currentPrice,
     this.baseValue,
     this.basePnl,
     this.baseCurrency,
@@ -15,6 +16,7 @@ class PositionRow extends StatelessWidget {
   });
 
   final Position position;
+  final double? currentPrice;
   final double? baseValue;
   final double? basePnl;
   final String? baseCurrency;
@@ -22,20 +24,25 @@ class PositionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pct = position.marketValue == 0
+    final effectivePrice = currentPrice ?? position.currentPrice;
+    final effectiveMarketValue = position.quantity * effectivePrice;
+    final effectivePnl = (effectivePrice - position.avgCost) * position.quantity;
+    final pct = effectiveMarketValue == 0
         ? 0.0
-        : 100 * (position.unrealizedPnl / position.marketValue);
+        : 100 * (effectivePnl / effectiveMarketValue);
 
     return ListTile(
       onTap: onTap,
       title: Text(position.symbol),
-      subtitle: Text('${position.name} · Qty ${position.quantity}'),
+      subtitle: Text(
+        '${position.name} · Qty ${position.quantity} · Px ${effectivePrice.toStringAsFixed(2)} ${position.currency}',
+      ),
       trailing: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           CurrencyAmount(
-            amount: position.marketValue,
+            amount: effectiveMarketValue,
             currency: position.currency,
             baseAmount: baseValue,
             baseCurrency: baseCurrency,
@@ -43,7 +50,7 @@ class PositionRow extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           PnlBadge(
-            amount: basePnl ?? position.unrealizedPnl,
+            amount: basePnl ?? effectivePnl,
             percent: pct,
             currency: baseCurrency ?? position.currency,
           ),

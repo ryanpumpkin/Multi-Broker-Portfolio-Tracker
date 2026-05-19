@@ -241,11 +241,17 @@ void main() {
       () async {
         final c = MockClient((_) async => http.Response('{}', 200));
         final client = build(c);
-        final url = await client.quotesStreamUrl(symbols: ['AAPL', 'GOOG']);
+        final url = await client.quotesStreamUrl(
+          symbols: ['AAPL', 'GOOG'],
+          wrappedCredsByConnection: const <String, String>{'c1': 'wrapped'},
+          wrappedCredsKeyBytes: const <int>[1, 2, 3],
+        );
         expect(url.scheme, 'wss');
         expect(url.path, '/v1/quotes/stream');
         expect(url.queryParameters['token'], 'tok');
         expect(url.queryParameters['symbols'], 'AAPL,GOOG');
+        expect(url.queryParameters['mbpCreds'], isNotNull);
+        expect(url.queryParameters['mbpCredsKey'], base64Encode([1, 2, 3]));
       },
     );
 

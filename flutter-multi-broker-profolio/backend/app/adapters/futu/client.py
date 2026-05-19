@@ -87,15 +87,69 @@ class FutuOpenDClient:  # pragma: no cover - SDK-bound; exercised via real OpenD
             if sub_type is not None:
                 ret, data = quote_ctx.subscribe(symbols, [sub_type], is_first_push=False)
                 _ensure_ok(ret, data, operation="subscribe")
-            while True:
-                ret, frame = quote_ctx.get_stock_quote(symbols)
-                _ensure_ok(ret, frame, operation="get_stock_quote")
-                rows = _rows_from_payload(frame)
-                for row in rows:
-                    if "timestamp" not in row:
-                        row["timestamp"] = datetime.now(UTC).isoformat()
-                    yield row
-                await asyncio.sleep(self._quote_poll_interval)
+
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            error_queue: asyncio.Queue[Exception] = asyncio.Queue()
+            push_wired = False
+
+            handler_base = getattr(self._sdk, "StockQuoteHandlerBase", None)
+            if isinstance(handler_base, type) and hasattr(quote_ctx, "set_handler"):
+                sdk = self._sdk
+
+                class _QuoteHandler(handler_base):  # type: ignore[misc, valid-type]
+                    def on_recv_rsp(self, rsp_pb: Any) -> tuple[Any, Any]:
+                        ret_code, payload = super().on_recv_rsp(rsp_pb)
+                        if ret_code != sdk.RET_OK:
+                            message = _extract_error_message(payload)
+                            lowered = message.lower()
+                            exc: Exception
+                            if any(marker in lowered for marker in _RATE_LIMIT_MARKERS):
+                                exc = TransientError(message)
+                            elif any(marker in lowered for marker in _CREDENTIAL_MARKERS):
+                                exc = PermanentError(message)
+                            else:
+                                exc = RuntimeError(message)
+                            loop.call_soon_threadsafe(error_queue.put_nowait, exc)
+                            return ret_code, payload
+
+                        for row in _rows_from_payload(payload):
+                            if "timestamp" not in row:
+                                row["timestamp"] = datetime.now(UTC).isoformat()
+                            loop.call_soon_threadsafe(queue.put_nowait, row)
+                        return ret_code, payload
+
+                quote_ctx.set_handler(_QuoteHandler())
+                push_wired = True
+
+            # Immediate snapshot so callers don't wait indefinitely for first tick.
+            ret, frame = quote_ctx.get_stock_quote(symbols)
+            _ensure_ok(ret, frame, operation="get_stock_quote")
+            for row in _rows_from_payload(frame):
+                if "timestamp" not in row:
+                    row["timestamp"] = datetime.now(UTC).isoformat()
+                yield row
+
+            if push_wired:
+                while True:
+                    if not error_queue.empty():
+                        raise await error_queue.get()
+                    try:
+                        row = await asyncio.wait_for(queue.get(), timeout=10.0)
+                        yield row
+                    except TimeoutError:
+                        # Keep socket warm while waiting for market movement.
+                        await asyncio.sleep(0)
+            else:
+                while True:
+                    ret, frame = quote_ctx.get_stock_quote(symbols)
+                    _ensure_ok(ret, frame, operation="get_stock_quote")
+                    rows = _rows_from_payload(frame)
+                    for row in rows:
+                        if "timestamp" not in row:
+                            row["timestamp"] = datetime.now(UTC).isoformat()
+                        yield row
+                    await asyncio.sleep(self._quote_poll_interval)
         finally:
             quote_ctx.close()
 

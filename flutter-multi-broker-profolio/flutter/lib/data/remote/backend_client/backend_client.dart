@@ -183,11 +183,14 @@ class BackendClient {
     final creds = wrappedCredsByConnection ?? const <String, String>{};
     if (creds.isEmpty) return null;
     return <String, String>{
-      mbpCredsHeader: base64Encode(utf8.encode(jsonEncode(creds))),
+      mbpCredsHeader: _encodeWrappedCredsMap(creds),
       if (wrappedCredsKeyBytes != null && wrappedCredsKeyBytes.isNotEmpty)
         mbpCredsKeyHeader: base64Encode(wrappedCredsKeyBytes),
     };
   }
+
+  String _encodeWrappedCredsMap(Map<String, String> creds) =>
+      base64Encode(utf8.encode(jsonEncode(creds)));
 
   // ------------- Endpoints -----------------------------------------------
 
@@ -291,15 +294,23 @@ class BackendClient {
   /// Builds the WebSocket URL for `/v1/quotes/stream`. Token is appended as
   /// a query parameter because browsers cannot set Authorization headers
   /// on the WS handshake.
-  Future<Uri> quotesStreamUrl({Iterable<String>? symbols}) async {
+  Future<Uri> quotesStreamUrl({
+    Iterable<String>? symbols,
+    Map<String, String>? wrappedCredsByConnection,
+    List<int>? wrappedCredsKeyBytes,
+  }) async {
     final token = await tokenProvider();
     final wsBase = config.effectiveWsBaseUrl();
     final basePath = wsBase.path.endsWith('/')
         ? wsBase.path.substring(0, wsBase.path.length - 1)
         : wsBase.path;
+    final creds = wrappedCredsByConnection ?? const <String, String>{};
     final q = <String, String>{
       if (token != null && token.isNotEmpty) 'token': token,
       if (symbols != null && symbols.isNotEmpty) 'symbols': symbols.join(','),
+      if (creds.isNotEmpty) 'mbpCreds': _encodeWrappedCredsMap(creds),
+      if (wrappedCredsKeyBytes != null && wrappedCredsKeyBytes.isNotEmpty)
+        'mbpCredsKey': base64Encode(wrappedCredsKeyBytes),
     };
     return wsBase.replace(
       path: '$basePath/quotes/stream',

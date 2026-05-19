@@ -690,8 +690,35 @@ class HttpxBinanceClient:  # pragma: no cover - real network wrapper
                 out.append(row)
         return out
 
-    def stream_mini_tickers(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]:
-        raise NotImplementedError("WS streaming is wired up by the aggregator module")
+    async def stream_mini_tickers(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]:
+        if not symbols:
+            return
+        sdk = await self._sdk_client()
+        try:
+            streams_mod = importlib.import_module("binance.streams")
+        except ModuleNotFoundError as exc:
+            raise PermanentError("python-binance streams module is unavailable") from exc
+        bsm_cls = getattr(streams_mod, "BinanceSocketManager", None)
+        if bsm_cls is None:
+            raise PermanentError("python-binance BinanceSocketManager is unavailable")
+
+        streams = [f"{symbol.lower()}@trade" for symbol in symbols if symbol]
+        manager = bsm_cls(sdk)
+        try:
+            socket = manager.multiplex_socket(streams)
+        except Exception as exc:
+            raise self._translate_exception(exc) from exc
+        async with socket as socket_conn:
+            while True:
+                try:
+                    frame = await socket_conn.recv()
+                except Exception as exc:
+                    raise self._translate_exception(exc) from exc
+                if not isinstance(frame, dict):
+                    continue
+                data = frame.get("data")
+                payload = data if isinstance(data, dict) else frame
+                yield payload
 
     async def ping(self) -> bool:
         try:

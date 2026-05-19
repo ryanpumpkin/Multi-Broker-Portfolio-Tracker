@@ -8,6 +8,18 @@ import 'backend_client.dart';
 /// Factory for opening a [WebSocketChannel]. Tests inject a fake.
 typedef WebSocketChannelFactory = WebSocketChannel Function(Uri url);
 
+class QuotesHandshake {
+  const QuotesHandshake({
+    this.wrappedCredsByConnection = const <String, String>{},
+    this.wrappedCredsKeyBytes,
+  });
+
+  final Map<String, String> wrappedCredsByConnection;
+  final List<int>? wrappedCredsKeyBytes;
+}
+
+typedef QuotesHandshakeProvider = Future<QuotesHandshake> Function();
+
 /// Subscribes to live price quotes via the backend's WebSocket stream.
 ///
 /// Auto-reconnects with exponential backoff and re-sends the current
@@ -15,6 +27,7 @@ typedef WebSocketChannelFactory = WebSocketChannel Function(Uri url);
 class QuotesStream {
   QuotesStream({
     required this.client,
+    this.handshakeProvider,
     WebSocketChannelFactory? channelFactory,
     this.initialBackoff = const Duration(milliseconds: 500),
     this.maxBackoff = const Duration(seconds: 30),
@@ -22,6 +35,7 @@ class QuotesStream {
   }) : _channelFactory = channelFactory ?? WebSocketChannel.connect;
 
   final BackendClient client;
+  final QuotesHandshakeProvider? handshakeProvider;
   final WebSocketChannelFactory _channelFactory;
   final Duration initialBackoff;
   final Duration maxBackoff;
@@ -60,14 +74,24 @@ class QuotesStream {
 
   /// Adds [symbols] to the current subscription.
   void addSymbols(Iterable<String> symbols) {
-    _symbols.addAll(symbols);
-    _sendSubscription();
+    final added = <String>[];
+    for (final symbol in symbols) {
+      if (_symbols.add(symbol)) {
+        added.add(symbol);
+      }
+    }
+    _sendDelta(op: 'add_symbol', symbols: added);
   }
 
   /// Removes [symbols] from the current subscription.
   void removeSymbols(Iterable<String> symbols) {
-    _symbols.removeAll(symbols);
-    _sendSubscription();
+    final removed = <String>[];
+    for (final symbol in symbols) {
+      if (_symbols.remove(symbol)) {
+        removed.add(symbol);
+      }
+    }
+    _sendDelta(op: 'remove_symbol', symbols: removed);
   }
 
   Future<void> dispose() async {
@@ -86,7 +110,12 @@ class QuotesStream {
   Future<void> _connect() async {
     if (_closed) return;
     try {
-      final url = await client.quotesStreamUrl(symbols: _symbols);
+      final handshake = await handshakeProvider?.call() ?? const QuotesHandshake();
+      final url = await client.quotesStreamUrl(
+        symbols: _symbols,
+        wrappedCredsByConnection: handshake.wrappedCredsByConnection,
+        wrappedCredsKeyBytes: handshake.wrappedCredsKeyBytes,
+      );
       final ch = _channelFactory(url);
       _channel = ch;
       _sendSubscription();
@@ -153,6 +182,24 @@ class QuotesStream {
     final msg = jsonEncode(<String, dynamic>{
       'op': 'subscribe',
       'symbols': _symbols.toList(growable: false),
+    });
+    try {
+      ch.sink.add(msg);
+    } catch (_) {
+      // sink closed — reconnect path will handle.
+    }
+  }
+
+  void _sendDelta({required String op, required Iterable<String> symbols}) {
+    final ch = _channel;
+    if (ch == null) return;
+    final cleaned = symbols.where((symbol) => symbol.trim().isNotEmpty).toList(
+          growable: false,
+        );
+    if (cleaned.isEmpty) return;
+    final msg = jsonEncode(<String, dynamic>{
+      'op': op,
+      'symbols': cleaned,
     });
     try {
       ch.sink.add(msg);

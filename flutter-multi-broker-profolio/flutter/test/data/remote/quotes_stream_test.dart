@@ -119,12 +119,38 @@ void main() {
     qs.addSymbols(['B', 'C']);
     qs.removeSymbols(['A']);
     await Future<void>.delayed(const Duration(milliseconds: 20));
-    final last =
-        jsonDecode(fake._outgoing.last! as String) as Map<String, dynamic>;
-    expect((last['symbols'] as List).toSet(), {'B', 'C'});
+    final out = fake._outgoing
+        .whereType<String>()
+        .map((s) => jsonDecode(s) as Map<String, dynamic>)
+        .toList();
+    expect(out.any((m) => m['op'] == 'add_symbol'), isTrue);
+    expect(out.any((m) => m['op'] == 'remove_symbol'), isTrue);
 
     await sub.cancel();
     await qs.dispose();
+  });
+
+  test('handshake provider attaches wrapped creds query params', () async {
+    Uri? seen;
+    final qs = QuotesStream(
+      client: buildClient(),
+      handshakeProvider: () async => const QuotesHandshake(
+        wrappedCredsByConnection: <String, String>{'c1': 'w1'},
+        wrappedCredsKeyBytes: <int>[1, 2, 3],
+      ),
+      channelFactory: (url) {
+        seen = url;
+        return FakeChannel();
+      },
+    );
+    final sub = qs.stream.listen((_) {});
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await sub.cancel();
+    await qs.dispose();
+
+    expect(seen, isNotNull);
+    expect(seen!.queryParameters['mbpCreds'], isNotNull);
+    expect(seen!.queryParameters['mbpCredsKey'], isNotNull);
   });
 
   test('reconnects after onDone using backoff', () async {

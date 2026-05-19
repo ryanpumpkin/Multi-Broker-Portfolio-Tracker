@@ -51,9 +51,13 @@ class _PositionsScreenState extends ConsumerState<PositionsScreen> {
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final position = positions[index];
+                        final liveQuote =
+                            ref.watch(quotesProvider(position.symbol)).valueOrNull;
+                        final livePrice = liveQuote?.price ?? position.currentPrice;
                         return PositionRow(
                           key: Key('position_${position.symbol}'),
                           position: position,
+                          currentPrice: livePrice,
                           baseCurrency: snapshot.baseCurrency,
                           onTap: () {
                             setState(() => _selected = position);
@@ -178,6 +182,8 @@ class _PositionsScreenState extends ConsumerState<PositionsScreen> {
   }
 
   Widget _detailPanel(Position position) {
+    final liveQuote = ref.watch(quotesProvider(position.symbol)).valueOrNull;
+    final livePrice = liveQuote?.price ?? position.currentPrice;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -189,14 +195,16 @@ class _PositionsScreenState extends ConsumerState<PositionsScreen> {
           const SizedBox(height: 12),
           Text('Quantity: ${position.quantity}'),
           Text('Avg cost: ${position.avgCost} ${position.currency}'),
-          Text('Current price: ${position.currentPrice} ${position.currency}'),
+          Text('Current price: $livePrice ${position.currency}'),
           const SizedBox(height: 10),
           PnlBadge(
-            amount: position.unrealizedPnl,
+            amount: (livePrice - position.avgCost) * position.quantity,
             currency: position.currency,
-            percent: position.marketValue == 0
+            percent: (position.quantity * livePrice) == 0
                 ? 0
-                : 100 * (position.unrealizedPnl / position.marketValue),
+                : 100 *
+                    (((livePrice - position.avgCost) * position.quantity) /
+                        (position.quantity * livePrice)),
           ),
         ],
       ),

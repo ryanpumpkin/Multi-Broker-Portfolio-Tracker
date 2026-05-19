@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -241,26 +242,77 @@ class IBKRClient:
         if stock_cls is None:  # pragma: no cover - env/setup issue
             raise PermanentError("ib_insync is not installed")
 
-        contracts = [stock_cls(symbol, "SMART", "USD") for symbol in symbols]
-        try:
-            tickers = await asyncio.to_thread(ib.reqTickers, *contracts)
-        except Exception as exc:  # noqa: BLE001
-            raise _classify_ibkr_error(exc) from exc
+        if not symbols:
+            return
 
-        for ticker in tickers:
+        contracts = [stock_cls(symbol, "SMART", "USD") for symbol in symbols]
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        stop_event = threading.Event()
+
+        def _to_payload(ticker: Any) -> dict[str, Any] | None:
             contract = getattr(ticker, "contract", None)
             symbol = getattr(contract, "symbol", None)
             if symbol is None:
-                continue
+                return None
             price = getattr(ticker, "marketPrice", lambda: None)()
             if price is None or price != price:  # NaN guard
-                continue
-            yield {
+                return None
+            return {
                 "symbol": symbol,
                 "price": str(price),
                 "currency": getattr(contract, "currency", "USD"),
                 "timestamp": datetime.now(UTC),
             }
+
+        def _pump() -> None:
+            listener = getattr(ib, "pendingTickersEvent", None)
+
+            def _on_pending(tickers: list[Any]) -> None:
+                for ticker in tickers:
+                    payload = _to_payload(ticker)
+                    if payload is None:
+                        continue
+                    loop.call_soon_threadsafe(queue.put_nowait, payload)
+
+            try:
+                for contract in contracts:
+                    ib.reqMktData(contract, "", False, False)
+                if listener is not None:
+                    listener += _on_pending
+                while not stop_event.is_set():
+                    ib.waitOnUpdate(timeout=1)
+            except Exception as exc:  # noqa: BLE001 - normalized on async side
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    {"__error__": str(_classify_ibkr_error(exc))},
+                )
+            finally:
+                if listener is not None:
+                    try:
+                        listener -= _on_pending
+                    except Exception:
+                        pass
+                for contract in contracts:
+                    try:
+                        ib.cancelMktData(contract)
+                    except Exception:
+                        pass
+
+        pump_task = asyncio.create_task(asyncio.to_thread(_pump))
+        try:
+            while True:
+                payload = await queue.get()
+                error = payload.get("__error__")
+                if isinstance(error, str) and error:
+                    raise _classify_ibkr_error(RuntimeError(error))
+                yield payload
+        except asyncio.CancelledError:
+            raise
+        finally:
+            stop_event.set()
+            pump_task.cancel()
+            await asyncio.gather(pump_task, return_exceptions=True)
 
 
 def _dec(v: Any) -> Decimal:

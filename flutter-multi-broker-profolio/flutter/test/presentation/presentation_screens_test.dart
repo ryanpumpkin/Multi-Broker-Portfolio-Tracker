@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:multi_broker_portfolio/domain/domain.dart';
 import 'package:multi_broker_portfolio/presentation/screens/alerts/alerts_screen.dart';
 import 'package:multi_broker_portfolio/presentation/screens/dashboard/dashboard_screen.dart';
 import 'package:multi_broker_portfolio/presentation/screens/positions/positions_screen.dart';
+import 'package:multi_broker_portfolio/state/repository_providers.dart';
 
 import 'presentation_test_harness.dart';
 
@@ -46,6 +50,36 @@ void main() {
     );
   });
 
+  testWidgets('positions uses live quote updates for price rendering',
+      (tester) async {
+    final repo = _PushQuotesRepository();
+    addTearDown(repo.dispose);
+
+    await tester.pumpWidget(
+      wrapForTest(
+        const PositionsScreen(),
+        overrides: [
+          quotesRepositoryProvider.overrideWithValue(repo),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Px 120.00 USD'), findsOneWidget);
+
+    repo.emit(
+      PriceQuote(
+        symbol: 'AAPL',
+        price: 130,
+        currency: 'USD',
+        timestamp: DateTime.utc(2026, 1, 1),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Px 130.00 USD'), findsOneWidget);
+  });
+
   testWidgets('alerts form validates required fields', (tester) async {
     await tester.pumpWidget(
       wrapForTest(
@@ -70,4 +104,21 @@ void main() {
       findsOneWidget,
     );
   });
+}
+
+class _PushQuotesRepository implements QuotesRepository {
+  final StreamController<PriceQuote> _controller =
+      StreamController<PriceQuote>.broadcast();
+
+  @override
+  Stream<PriceQuote> streamQuotes(List<String> symbols) {
+    final wanted = symbols.map((symbol) => symbol.toUpperCase()).toSet();
+    return _controller.stream.where(
+      (quote) => wanted.contains(quote.symbol.toUpperCase()),
+    );
+  }
+
+  void emit(PriceQuote quote) => _controller.add(quote);
+
+  Future<void> dispose() => _controller.close();
 }
