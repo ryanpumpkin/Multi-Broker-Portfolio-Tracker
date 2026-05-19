@@ -18,7 +18,7 @@ execute multiple in parallel.
 
 ## Item 1 — Strip diagnostic logging
 
-**Slice id:** `cleanup-diagnostic-logging` `[~]`
+**Slice id:** `cleanup-diagnostic-logging` `[x]`
 
 **Why:** During the broker-integration debugging session we
 added several `INFO`-level structured log lines that dumped
@@ -82,8 +82,7 @@ print credentials-adjacent data if response shapes ever change.
 
 ## Item 2 — Wire the other three brokers end-to-end
 
-**Slice id:** `broker-integration-binance`,
-`broker-integration-ibkr`, `broker-integration-futu`
+**Slice id:** `broker-integration-binance` `[~]`, `broker-integration-ibkr` `[~]`, `broker-integration-futu` `[~]`
 
 LongBridge is fully wired. The other three brokers have working
 SDK clients and adapters, but no one has driven a real
