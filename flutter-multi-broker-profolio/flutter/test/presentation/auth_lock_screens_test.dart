@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:multi_broker_portfolio/app_lock/app_lock.dart';
+import 'package:multi_broker_portfolio/data/crypto/e2e.dart';
 import 'package:multi_broker_portfolio/data/repositories/auth_repository_impl.dart';
 import 'package:multi_broker_portfolio/domain/domain.dart';
 import 'package:multi_broker_portfolio/presentation/auth/password_reset_screen.dart';
@@ -12,6 +14,7 @@ import 'package:multi_broker_portfolio/presentation/auth/sign_up_screen.dart';
 import 'package:multi_broker_portfolio/presentation/lock/app_lock_settings_section.dart';
 import 'package:multi_broker_portfolio/presentation/lock/pin_setup_screen.dart';
 import 'package:multi_broker_portfolio/state/app_lock_provider.dart';
+import 'package:multi_broker_portfolio/state/credential_key_provider.dart';
 import 'package:multi_broker_portfolio/state/repository_providers.dart';
 
 void main() {
@@ -94,6 +97,15 @@ void main() {
           appLockStoreProvider.overrideWithValue(store),
           appLockBiometricAuthenticatorProvider
               .overrideWithValue(_FakeBiometricAuth()),
+          e2eCryptoProvider.overrideWithValue(
+            E2eCrypto.withKdf(
+              Pbkdf2(
+                macAlgorithm: Hmac.sha256(),
+                iterations: 1,
+                bits: 256,
+              ),
+            ),
+          ),
         ],
         child: const MaterialApp(home: PinSetupScreen()),
       ),

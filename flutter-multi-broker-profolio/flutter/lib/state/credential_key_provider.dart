@@ -18,6 +18,13 @@ final credentialKeyProvider =
   CredentialKeyController.new,
 );
 
+/// Injectable E2E crypto. Default uses Argon2id; tests override with a
+/// faster KDF (PBKDF2 with low iterations) so widget tests can `await`
+/// key derivation without hanging.
+final e2eCryptoProvider = Provider<E2eCrypto>(
+  (ref) => E2eCrypto.production(),
+);
+
 class CredentialKeyController extends Notifier<E2eKey?> {
   @override
   E2eKey? build() {
@@ -37,7 +44,7 @@ class CredentialKeyController extends Notifier<E2eKey?> {
   /// salt on first use and persists it.
   Future<void> deriveAndCache(String pin, {E2eCrypto? cryptoForTest}) async {
     final store = ref.read(appLockStoreProvider);
-    final crypto = cryptoForTest ?? E2eCrypto.production();
+    final E2eCrypto crypto = cryptoForTest ?? ref.read(e2eCryptoProvider);
 
     var saltB64 = await store.readSalt();
     if (saltB64 == null) {

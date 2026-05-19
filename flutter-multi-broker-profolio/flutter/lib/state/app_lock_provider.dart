@@ -137,11 +137,11 @@ class AppLockController extends AsyncNotifier<AppLockState> {
     await _store.writePinHash(hash);
     final current = await future;
     state = AsyncData(current.copyWith(hasPin: true));
-    // Eagerly derive the credential-encryption key so the user can add
-    // connections immediately after setting their PIN, without locking
-    // and re-entering it.
-    // ignore: unawaited_futures
-    ref.read(credentialKeyProvider.notifier).deriveAndCache(pin);
+    // Await the derivation so callers (e.g. the connections screen) can
+    // read a non-null credentialKeyProvider immediately after setPin
+    // returns. Previously fire-and-forget, which raced the next request
+    // and produced "missing wrapped credentials" failures.
+    await ref.read(credentialKeyProvider.notifier).deriveAndCache(pin);
   }
 
   Future<bool> unlockWithPin(String pin) async {
@@ -162,11 +162,9 @@ class AppLockController extends AsyncNotifier<AppLockState> {
           backoffUntil: null,
         ),
       );
-      // Derive the credential-encryption key from the PIN. Fire-and-forget;
-      // the dialog flow that needs it awaits credentialKeyProvider before
-      // attempting to encrypt anything.
-      // ignore: unawaited_futures
-      ref.read(credentialKeyProvider.notifier).deriveAndCache(pin);
+      // Derive the credential-encryption key from the PIN before
+      // returning, so the caller can use it without racing the unlock.
+      await ref.read(credentialKeyProvider.notifier).deriveAndCache(pin);
       return true;
     }
     state = AsyncData(_withFailedAttempt(current));
