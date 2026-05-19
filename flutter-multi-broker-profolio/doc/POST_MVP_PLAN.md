@@ -273,7 +273,7 @@ historical executions endpoint we aren't using:
 
 ## Item 4 — Live quote streaming via WebSocket
 
-**Slice id:** `live-quote-streaming` `[~]`
+**Slice id:** `live-quote-streaming` `[x]`
 
 **Why:** The proposal §6 calls for real-time quotes via
 WebSocket. The infrastructure is scaffolded (`QuotesStream` on
@@ -330,7 +330,7 @@ connects.
 
 ## Item 5 — Final report + handoff
 
-**Slice id:** `final-report`
+**Slice id:** `final-report` `[~]`
 
 **Why:** Wrap up.
 
