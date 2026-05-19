@@ -18,7 +18,7 @@ execute multiple in parallel.
 
 ## Item 1 — Strip diagnostic logging
 
-**Slice id:** `cleanup-diagnostic-logging`
+**Slice id:** `cleanup-diagnostic-logging` `[~]`
 
 **Why:** During the broker-integration debugging session we
 added several `INFO`-level structured log lines that dumped
