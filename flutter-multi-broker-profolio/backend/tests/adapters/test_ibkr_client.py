@@ -349,6 +349,41 @@ async def test_fetch_executions_maps_filters_sorts_and_limits() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_executions_applies_90d_default_window_when_since_absent() -> None:
+    contract = _Obj(localSymbol="AAPL", currency="USD")
+    trade = _Obj(
+        contract=contract,
+        fills=[
+            _Obj(
+                execution=_Obj(
+                    acctNumber="U1",
+                    execId="recent",
+                    side="BOT",
+                    shares=1,
+                    price=1,
+                    time=datetime.now(UTC) - timedelta(days=5),
+                ),
+            ),
+            _Obj(
+                execution=_Obj(
+                    acctNumber="U1",
+                    execId="old",
+                    side="BOT",
+                    shares=1,
+                    price=1,
+                    time=datetime.now(UTC) - timedelta(days=120),
+                ),
+            ),
+        ],
+    )
+    ib = _FakeIb(trades_rows=[trade])
+    client = IBKRClient(ib=ib)
+
+    rows = await client.fetch_executions(since=None, limit=None)
+    assert [r["execId"] for r in rows] == ["recent"]
+
+
+@pytest.mark.asyncio
 async def test_fetch_executions_classifies_errors() -> None:
     ib = _FakeIb(trades_raises=Exception("permission denied"))
     client = IBKRClient(ib=ib)

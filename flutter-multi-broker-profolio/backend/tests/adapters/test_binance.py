@@ -345,6 +345,40 @@ async def test_trade_or_withdraw_key_rejected_on_transactions_init_check() -> No
         await adapter.list_transactions()
 
 
+class _PagedMyTradesSdk:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def get_my_trades(self, **params: Any) -> Any:
+        self.calls.append(dict(params))
+        start = int(params.get("startTime", 0))
+        limit = int(params.get("limit", 0))
+        if start == 1000:
+            return [
+                {"id": i + 1, "symbol": "BTCUSDT", "time": start + i}
+                for i in range(limit)
+            ]
+        if start > 1000:
+            return [{"id": 999999, "symbol": "BTCUSDT", "time": start}]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_httpx_client_get_my_trades_pages_when_limit_exceeds_single_call() -> None:
+    sdk = _PagedMyTradesSdk()
+    client = HttpxBinanceClient(
+        BinanceCredentials(api_key="k", api_secret="s"),
+        host=BinanceHost.COM,
+    )
+    client._sdk = sdk  # type: ignore[assignment]
+
+    rows = await client.get_my_trades(symbol="BTCUSDT", since="1000", limit=1001)
+    assert len(rows) == 1001
+    assert len(sdk.calls) == 2
+    assert int(sdk.calls[0]["startTime"]) == 1000
+    assert int(sdk.calls[1]["startTime"]) == 2000
+
+
 @pytest.mark.asyncio
 async def test_integration_real_binance_balances_env_gated() -> None:
     api_key = os.getenv("BINANCE_API_KEY")
@@ -364,5 +398,28 @@ async def test_integration_real_binance_balances_env_gated() -> None:
         adapter = BinanceAdapter(client, retry=RetryPolicy(max_attempts=2, initial_delay=0.1))
         balances = await adapter.list_balances()
         assert isinstance(balances, list)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_integration_real_binance_transactions_env_gated() -> None:
+    api_key = os.getenv("BINANCE_API_KEY")
+    api_secret = os.getenv("BINANCE_API_SECRET")
+    region = (os.getenv("BINANCE_REGION") or "com").lower()
+    if not (api_key and api_secret):
+        pytest.skip("Binance integration env vars not set")
+
+    pytest.importorskip("binance.async_client")
+
+    host = BinanceHost.US if region in {"us", "binance.us"} else BinanceHost.COM
+    client = HttpxBinanceClient(
+        BinanceCredentials(api_key=api_key, api_secret=api_secret),
+        host=host,
+    )
+    try:
+        adapter = BinanceAdapter(client, retry=RetryPolicy(max_attempts=2, initial_delay=0.1))
+        txs = await adapter.list_transactions(limit=20)
+        assert len(txs) >= 1
     finally:
         await client.close()

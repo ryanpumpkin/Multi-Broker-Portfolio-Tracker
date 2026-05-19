@@ -154,7 +154,16 @@ def _map_transaction(raw: Any) -> Transaction:
         raise PermanentError("longbridge transaction missing id")
     side_raw = _lookup(raw, "side")
     side = str(side_raw).lower() if side_raw is not None else None
-    timestamp = _lookup(raw, "submitted_at", "trade_done_at", "timestamp")
+    timestamp = _lookup(
+        raw,
+        "submitted_at",
+        "trade_done_at",
+        "executed_at",
+        "created_at",
+        "updated_at",
+        "timestamp",
+        "time",
+    )
     if timestamp is None:
         raise PermanentError("longbridge transaction missing timestamp")
     return Transaction(

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import types
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -17,6 +18,9 @@ from app.adapters._common import PermanentError, TransientError
 from app.adapters.futu.client import (
     _ensure_ok,
     _extract_error_message,
+    _futu_day,
+    _history_window,
+    _parse_since,
     _rows_from_payload,
 )
 
@@ -70,6 +74,18 @@ def test_rows_from_payload_single_dict_wrapped() -> None:
 def test_rows_from_payload_unsupported_raises() -> None:
     with pytest.raises(RuntimeError):
         _rows_from_payload(42)
+
+
+def test_parse_since_and_format_day() -> None:
+    parsed = _parse_since("2026-05-01T12:00:00Z")
+    assert parsed == datetime(2026, 5, 1, 12, tzinfo=UTC)
+    assert _futu_day(parsed) == "2026-05-01"
+
+
+def test_history_window_defaults_to_90_days() -> None:
+    start, end = _history_window(None)
+    delta_days = (end - start).days
+    assert 89 <= delta_days <= 91
 
 
 # ---------------------------------------------------------------------------

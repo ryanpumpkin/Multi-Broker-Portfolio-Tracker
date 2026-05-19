@@ -15,7 +15,7 @@ import asyncio
 import importlib
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -36,6 +36,7 @@ from app.models.domain import (
 )
 
 SOURCE_NAME = "ibkr"
+_DEFAULT_TX_WINDOW_DAYS = 90
 
 
 class IbkrClient(Protocol):
@@ -223,11 +224,10 @@ class IBKRClient:
                     }
                 )
 
-        if since is not None:
-            since_dt = _parse_ts(since)
-            out = [row for row in out if _parse_ts(row["time"]) >= since_dt]
+        since_dt = _since_or_default(since)
+        out = [row for row in out if _parse_ts(row["time"]) >= since_dt]
         out.sort(key=lambda row: _parse_ts(row["time"]))
-        if limit is not None:
+        if limit is not None and limit >= 0:
             out = out[-limit:]
         return out
 
@@ -330,6 +330,12 @@ def _map_quote(raw: dict[str, Any]) -> Quote:
         currency=raw["currency"],
         timestamp=_parse_ts(raw.get("t") or raw["timestamp"]),
     )
+
+
+def _since_or_default(since: str | None) -> datetime:
+    if since is None:
+        return datetime.now(UTC) - timedelta(days=_DEFAULT_TX_WINDOW_DAYS)
+    return _parse_ts(since)
 
 
 class IbkrAdapter(SourceAdapter):

@@ -97,30 +97,30 @@ just an API key. Confirms the multi-broker shape works.
 
 **Subtasks:**
 
-- [ ] User creates a read-only API key at binance.com or
+- [~] User creates a read-only API key at binance.com or
   binance.us:
   - Tick **only** "Enable Reading" — leave Trade, Withdraw,
     Margin, Futures **off**. Binance enforces this server-side.
   - Restrict by IP if possible (paranoid mode).
-- [ ] In the Flutter Add Connection dialog, pick `binance`,
+- [~] In the Flutter Add Connection dialog, pick `binance`,
   enter `apiKey`, `apiSecret`, and `region` (`com` or `us`).
-- [ ] Refresh the dashboard. Backend should:
+- [~] Refresh the dashboard. Backend should:
   1. Build the wrapped credentials.
   2. Instantiate `BinanceAdapter` via the factory.
   3. Call `client.account()` and pull spot balances.
   4. Call `client.myTrades()` for recent trades (skip per-symbol,
      `myTrades` only returns trades for a given symbol — see
      Open Items below).
-- [ ] **Likely fix needed:** the existing `HttpxBinanceClient`
+- [~] **Likely fix needed:** the existing `HttpxBinanceClient`
   uses HMAC-SHA256 signing per the Binance docs. Verify against
   `https://api.binance.com/api/v3/account` with a real key. If
   the signed query string format is wrong, fix per
   https://binance-docs.github.io/apidocs/spot/en/#endpoint-security-type
-- [ ] Map response to `Position` + `CashBalance`. Binance returns
+- [~] Map response to `Position` + `CashBalance`. Binance returns
   asset balances, not equities — represent crypto holdings as
   positions with `currency` = the quote-asset symbol (e.g.
   `USDT`) and `symbol` = the base asset (e.g. `BTC`).
-- [ ] Spot-only. Skip futures + margin + options.
+- [~] Spot-only. Skip futures + margin + options.
 
 **Gates:**
 
@@ -138,35 +138,35 @@ gateway needs interactive login on first run.
 
 **Subtasks:**
 
-- [ ] Decide between Client Portal Web API gateway
+- [~] Decide between Client Portal Web API gateway
   (recommended for headless server) vs IB Gateway / TWS
   (graphical, interactive login).
-- [ ] Start the sidecar via `docker compose up ibkr-gateway`.
+- [~] Start the sidecar via `docker compose up ibkr-gateway`.
   Verify the gateway is reachable from the backend container at
   `ibkr-gateway:5000`. The current compose file references
   `ghcr.io/unusualwhale/ibkr-cpapi:latest` — confirm that image
   exists or substitute one.
-- [ ] **Authenticate once.** Most CP-Gateway images require a
+- [~] **Authenticate once.** Most CP-Gateway images require a
   one-time interactive auth at `https://<host>:5000/`. After
   successful auth the session lives in the gateway's state
   volume (`ibkr-state`) until the periodic re-auth expires
   (typically 24h).
-- [ ] Wire the keep-alive tickle: `IbkrAdapter.start_keepalive`
+- [~] Wire the keep-alive tickle: `IbkrAdapter.start_keepalive`
   exists but isn't called anywhere. Either:
   - Start it on backend boot (one task per active IBKR
     connection), or
   - Call `client.tickle()` opportunistically on each
     request.
-- [ ] In the Flutter Add Connection dialog, pick `ibkr`, enter
+- [~] In the Flutter Add Connection dialog, pick `ibkr`, enter
   the optional `accountId` (e.g. `U12345`). The gateway handles
   the actual login.
-- [ ] Refresh the dashboard. Backend should:
+- [~] Refresh the dashboard. Backend should:
   1. Build the wrapped credentials (mostly metadata since
      the real login is at the gateway).
   2. Instantiate `IbkrAdapter` via the factory.
   3. Call `client.fetch_positions()`, `client.fetch_account_summary()`.
   4. Map to domain.
-- [ ] Add an integration test gated on env vars `IBKR_GATEWAY_HOST`
+- [~] Add an integration test gated on env vars `IBKR_GATEWAY_HOST`
   / `IBKR_GATEWAY_PORT` that, when set, hits a real running
   gateway and asserts at least one position row.
 
@@ -186,24 +186,24 @@ session that the user must supply.
 
 **Subtasks:**
 
-- [ ] Start the sidecar via `docker compose up futu-opend`.
+- [~] Start the sidecar via `docker compose up futu-opend`.
   Verify reachable at `futu-opend:11111`. Current compose file
   references `ghcr.io/futu-sg/futunng-opend:latest` — confirm or
   substitute.
-- [ ] OpenD handles the account login at startup using env vars
+- [~] OpenD handles the account login at startup using env vars
   (`FUTU_OPEND_LOGIN_ACCOUNT`, `FUTU_OPEND_LOGIN_PASSWORD_MD5`).
   Once logged in, OpenD exposes a localhost API.
-- [ ] In the Flutter Add Connection dialog, pick `futu`. Add a
+- [~] In the Flutter Add Connection dialog, pick `futu`. Add a
   **trade unlock password** field — this is captured per request
   and never persisted. The credentials dict goes through the
   same E2E wrap as everything else; the backend's
   `FutuAdapter._unlocked` context manager unlocks the trade
   context, runs the query, then re-locks.
-- [ ] Currently the existing `FutuAdapter` already has the
+- [~] Currently the existing `FutuAdapter` already has the
   unlock pattern wired (`get_request_trade_password`). Verify
   the `unlock_password_provider` callback resolves correctly
   from the per-request credential context.
-- [ ] Refresh the dashboard. Backend should:
+- [~] Refresh the dashboard. Backend should:
   1. Build wrapped credentials including the trade password.
   2. Instantiate `FutuAdapter`.
   3. Call `client.fetch_positions()`, `client.fetch_accounts()`.
@@ -241,19 +241,19 @@ historical executions endpoint we aren't using:
 
 **Subtasks per broker:**
 
-- [ ] In each `<broker>/client.py`, add a `list_transactions`
+- [x] In each `<broker>/client.py`, add a `list_transactions`
   flow that accepts `since: datetime | None` and `limit: int |
   None`, and calls the broker's history endpoint with a sensible
   default window (last 90 days when `since` is None).
-- [ ] In each `<broker>/adapter.py`, ensure `list_transactions`
+- [x] In each `<broker>/adapter.py`, ensure `list_transactions`
   passes `since` + `limit` through to the client.
-- [ ] In Flutter, the transactions screen already calls
+- [x] In Flutter, the transactions screen already calls
   `transactionsRepository.list({sourceId, range})`. Verify the
   range default is "last 30 days" — extend if needed.
-- [ ] Add a paging mechanism if any broker enforces a max
+- [x] Add a paging mechanism if any broker enforces a max
   result count (Binance is 1000/call, LongBridge unknown).
-- [ ] Cache hits to Drift so re-opens are instant.
-- [ ] Update the `transactionsCache` schema only if needed —
+- [x] Cache hits to Drift so re-opens are instant.
+- [x] Update the `transactionsCache` schema only if needed —
   the existing columns cover what brokers return.
 
 **Out of scope:**

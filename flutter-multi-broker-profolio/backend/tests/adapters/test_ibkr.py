@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from decimal import Decimal
 from typing import Any
@@ -10,7 +11,7 @@ from typing import Any
 import pytest
 
 from app.adapters._common import PermanentError, RetryPolicy, TransientError
-from app.adapters.ibkr import IbkrAdapter
+from app.adapters.ibkr import IbkrAdapter, IBKRClient
 from app.models.domain import SourceHealthStatus
 
 
@@ -213,3 +214,17 @@ async def test_keepalive_records_failure_and_keeps_looping() -> None:
     await asyncio.sleep(0.02)
     await adapter.stop_keepalive()
     assert client.tickle_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_integration_real_ibkr_transactions_env_gated() -> None:
+    account_id = os.getenv("IBKR_ACCOUNT_ID")
+    if not account_id:
+        pytest.skip("IBKR integration env vars not set")
+
+    pytest.importorskip("ib_insync")
+
+    client = IBKRClient(account_id=account_id)
+    adapter = IbkrAdapter(client, retry=RetryPolicy(max_attempts=2, initial_delay=0.1))
+    txs = await adapter.list_transactions(limit=20)
+    assert len(txs) >= 1

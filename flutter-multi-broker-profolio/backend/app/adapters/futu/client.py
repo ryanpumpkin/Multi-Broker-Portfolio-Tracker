@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.adapters._common import PermanentError, TransientError
@@ -30,6 +30,8 @@ _CREDENTIAL_MARKERS = (
     "forbidden",
     "auth",
 )
+_DEFAULT_TX_WINDOW_DAYS = 90
+_HISTORY_CHUNK_DAYS = 30
 
 
 class FutuOpenDClient:  # pragma: no cover - SDK-bound; exercised via real OpenD integration test
@@ -70,8 +72,8 @@ class FutuOpenDClient:  # pragma: no cover - SDK-bound; exercised via real OpenD
         since: str | None,
         limit: int | None,
     ) -> list[dict[str, Any]]:
-        rows = await asyncio.to_thread(self._fetch_history_deals_sync, since)
-        return rows[:limit] if limit is not None else rows
+        rows = await asyncio.to_thread(self._fetch_history_deals_sync, since, limit)
+        return rows[:limit] if limit is not None and limit >= 0 else rows
 
     async def ping(self) -> bool:
         return await asyncio.to_thread(self._ping_sync)
@@ -149,19 +151,36 @@ class FutuOpenDClient:  # pragma: no cover - SDK-bound; exercised via real OpenD
         finally:
             trade_ctx.close()
 
-    def _fetch_history_deals_sync(self, since: str | None) -> list[dict[str, Any]]:
-        trade_ctx = self._trade_context()
-        try:
-            kwargs: dict[str, Any] = {"trd_env": self._trd_env()}
-            if since:
-                kwargs["start"] = since
-            if self._acc_id is not None:
-                kwargs["acc_id"] = self._acc_id
-            ret, frame = trade_ctx.history_deal_list_query(**kwargs)
-            _ensure_ok(ret, frame, operation="history_deal_list_query")
-            return _rows_from_payload(frame)
-        finally:
-            trade_ctx.close()
+    def _fetch_history_deals_sync(
+        self,
+        since: str | None,
+        limit: int | None,
+    ) -> list[dict[str, Any]]:
+        start_at, end_at = _history_window(since)
+        out: list[dict[str, Any]] = []
+        cursor = start_at
+        while cursor <= end_at:
+            chunk_end = min(cursor + timedelta(days=_HISTORY_CHUNK_DAYS), end_at)
+            trade_ctx = self._trade_context()
+            try:
+                kwargs: dict[str, Any] = {
+                    "trd_env": self._trd_env(),
+                    "start": _futu_day(cursor),
+                    "end": _futu_day(chunk_end),
+                }
+                if self._acc_id is not None:
+                    kwargs["acc_id"] = self._acc_id
+                ret, frame = trade_ctx.history_deal_list_query(**kwargs)
+                _ensure_ok(ret, frame, operation="history_deal_list_query")
+                out.extend(_rows_from_payload(frame))
+            finally:
+                trade_ctx.close()
+            if limit is not None and limit >= 0 and len(out) >= limit:
+                break
+            if chunk_end >= end_at:
+                break
+            cursor = chunk_end + timedelta(microseconds=1)
+        return out
 
     def _ping_sync(self) -> bool:
         quote_ctx = self._sdk.OpenQuoteContext(host=self._host, port=self._port)
@@ -217,6 +236,24 @@ def _ensure_ok(ret_code: Any, payload: Any, *, operation: str) -> None:
     if any(marker in lowered for marker in _CREDENTIAL_MARKERS):
         raise PermanentError(message)
     raise RuntimeError(message)
+
+
+def _history_window(since: str | None) -> tuple[datetime, datetime]:
+    end_at = datetime.now(UTC)
+    if since is None:
+        start_at = end_at - timedelta(days=_DEFAULT_TX_WINDOW_DAYS)
+    else:
+        start_at = _parse_since(since)
+    return start_at, end_at
+
+
+def _parse_since(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _futu_day(value: datetime) -> str:
+    return value.astimezone(UTC).strftime("%Y-%m-%d")
 
 
 __all__ = ["FutuOpenDClient"]

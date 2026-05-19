@@ -12,12 +12,14 @@ import logging
 import types
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.adapters._common import PermanentError, TransientError
 
 _LOG = logging.getLogger("mbp.longbridge.client")
+_DEFAULT_TX_WINDOW_DAYS = 90
+_HISTORY_CHUNK_DAYS = 30
 
 
 @dataclass(slots=True)
@@ -159,23 +161,40 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         since: str | None,
         limit: int | None,
     ) -> list[Any]:
-        # LongBridge executions endpoint is "today" scoped. The response
-        # may be a `TodayExecutionsResponse` with `.trades` (newer SDK)
-        # or a bare iterable of executions (older SDK).
-        result = await _to_thread(self._trade_ctx.today_executions)
-        rows = list(_to_iterable(result, attribute="trades"))
+        start_at = _history_start(since)
+        end_at = datetime.now(UTC)
+        rows: list[Any] = []
+        cursor = start_at
+        while cursor <= end_at:
+            chunk_end = min(cursor + timedelta(days=_HISTORY_CHUNK_DAYS), end_at)
+            result = await _to_thread(
+                _history_executions_call,
+                self._trade_ctx,
+                start_at=cursor,
+                end_at=chunk_end,
+            )
+            chunk_rows = _history_rows(result)
+            rows.extend(chunk_rows)
+            if limit is not None and limit >= 0 and len(rows) >= limit:
+                break
+            if chunk_end >= end_at:
+                break
+            cursor = chunk_end + timedelta(microseconds=1)
 
-        if since is not None:
-            threshold = _parse_since(since)
-            kept: list[Any] = []
-            for row in rows:
-                timestamp = _row_timestamp(row)
-                if timestamp is None or timestamp >= threshold:
-                    kept.append(row)
-            rows = kept
+        threshold = _parse_since(since) if since is not None else start_at
+        kept: list[Any] = []
+        for row in rows:
+            timestamp = _row_timestamp(row)
+            if timestamp is None or timestamp >= threshold:
+                kept.append(row)
+        fallback_ts = datetime.max.replace(tzinfo=UTC)
+        kept.sort(
+            key=lambda row: _row_timestamp(row) or fallback_ts,
+            reverse=True,
+        )
         if limit is not None and limit >= 0:
-            rows = rows[:limit]
-        return rows
+            return kept[:limit]
+        return kept
 
     async def ping(self) -> bool:
         await _to_thread(self._trade_ctx.account_balance)
@@ -350,12 +369,75 @@ def _parse_since(value: str) -> datetime:
     return parsed
 
 
+def _history_start(since: str | None) -> datetime:
+    if since is not None:
+        return _parse_since(since)
+    return datetime.now(UTC) - timedelta(days=_DEFAULT_TX_WINDOW_DAYS)
+
+
+def _history_executions_call(
+    trade_ctx: Any,
+    *,
+    start_at: datetime,
+    end_at: datetime,
+) -> Any:
+    history_fn = getattr(trade_ctx, "history_executions", None)
+    if not callable(history_fn):
+        return trade_ctx.today_executions()
+    attempts: tuple[dict[str, Any], ...] = (
+        {"symbol": None, "start_at": start_at, "end_at": end_at},
+        {"start_at": start_at, "end_at": end_at},
+        {"symbol": None, "start": start_at, "end": end_at},
+        {"start": start_at, "end": end_at},
+    )
+    for kwargs in attempts:
+        try:
+            return history_fn(**kwargs)
+        except TypeError:
+            continue
+    return history_fn(start_at, end_at)
+
+
+def _history_rows(result: Any) -> list[Any]:
+    if isinstance(result, dict):
+        for key in ("executions", "trades", "items", "list"):
+            value = result.get(key)
+            if isinstance(value, list):
+                return value
+    rows = _to_iterable(
+        result,
+        attribute="executions",
+        attribute_fallback="trades",
+    )
+    if rows:
+        return rows
+    return _to_iterable(result, attribute="list")
+
+
 def _row_timestamp(row: Any) -> datetime | None:
-    value = getattr(row, "trade_done_at", None)
-    if value is None and isinstance(row, dict):
-        value = row.get("trade_done_at")
+    keys = (
+        "trade_done_at",
+        "submitted_at",
+        "executed_at",
+        "created_at",
+        "timestamp",
+        "time",
+        "updated_at",
+    )
+    value: Any | None = None
+    for key in keys:
+        value = getattr(row, key, None)
+        if value is None and isinstance(row, dict):
+            value = row.get(key)
+        if value is not None:
+            break
     if value is None:
         return None
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if isinstance(value, int | float):
+        ts = float(value)
+        if ts > 1e12:
+            ts /= 1000.0
+        return datetime.fromtimestamp(ts, tz=UTC)
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))

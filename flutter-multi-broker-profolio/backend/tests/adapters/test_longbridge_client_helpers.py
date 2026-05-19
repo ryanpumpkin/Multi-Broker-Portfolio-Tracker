@@ -14,6 +14,8 @@ import pytest
 from app.adapters._common import PermanentError, TransientError
 from app.adapters.longbridge.client import (
     _classify_sdk_error,
+    _history_rows,
+    _history_start,
     _parse_since,
     _row_timestamp,
     _to_iterable,
@@ -38,6 +40,17 @@ def test_parse_since_offset() -> None:
 def test_parse_since_naive_defaults_to_utc() -> None:
     parsed = _parse_since("2026-01-15T12:30:00")
     assert parsed.tzinfo == UTC
+
+
+def test_history_start_defaults_to_90_days_window() -> None:
+    start = _history_start(None)
+    delta_days = (datetime.now(UTC) - start).days
+    assert 89 <= delta_days <= 91
+
+
+def test_history_start_uses_since_value_when_provided() -> None:
+    parsed = _history_start("2026-01-15T12:30:00Z")
+    assert parsed == datetime(2026, 1, 15, 12, 30, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +82,11 @@ def test_row_timestamp_attr_iso_string() -> None:
 def test_row_timestamp_dict_key() -> None:
     row = {"trade_done_at": "2026-02-01T00:00:00Z"}
     assert _row_timestamp(row) == datetime(2026, 2, 1, tzinfo=UTC)
+
+
+def test_row_timestamp_supports_numeric_millis() -> None:
+    row = {"timestamp": 1736899200000}
+    assert _row_timestamp(row) == datetime(2025, 1, 15, tzinfo=UTC)
 
 
 def test_row_timestamp_missing_returns_none() -> None:
@@ -201,3 +219,12 @@ def test_to_iterable_iterates_if_iter_supported() -> None:
 def test_to_iterable_unsupported_returns_empty() -> None:
     resp = _ResponseWith(unrelated="thing")
     assert _to_iterable(resp, attribute="channels") == []
+
+
+def test_history_rows_prefers_executions_attribute() -> None:
+    resp = _ResponseWith(executions=[{"id": "1"}], trades=[{"id": "2"}])
+    assert _history_rows(resp) == [{"id": "1"}]
+
+
+def test_history_rows_supports_dict_items_shape() -> None:
+    assert _history_rows({"items": [{"id": "x"}]}) == [{"id": "x"}]

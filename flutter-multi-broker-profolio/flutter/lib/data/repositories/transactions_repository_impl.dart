@@ -28,7 +28,6 @@ class TransactionsRepositoryImpl implements TransactionsRepository {
       final raw = await backend.getTransactions(
         sourceId: sourceId,
         start: range?.start,
-        end: range?.end,
         wrappedCredsByConnection: wrapped.tokensByConnection,
         wrappedCredsKeyBytes: wrapped.keyBytes,
       );

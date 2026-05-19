@@ -4,6 +4,7 @@ import '../domain/domain.dart';
 import 'repository_providers.dart';
 
 const int kDefaultTransactionsPageSize = 50;
+const Duration kDefaultTransactionsWindow = Duration(days: 30);
 
 final transactionsProvider =
     AsyncNotifierProvider<TransactionsController, PaginatedTransactionsState>(
@@ -35,7 +36,7 @@ class PaginatedTransactionsState {
 class TransactionsController extends AsyncNotifier<PaginatedTransactionsState> {
   List<Transaction> _allFiltered = const <Transaction>[];
   String? _sourceId;
-  DateRange? _range;
+  DateRange? _range = _defaultRange();
   TransactionType? _type;
 
   @override
@@ -54,7 +55,7 @@ class TransactionsController extends AsyncNotifier<PaginatedTransactionsState> {
     TransactionType? type,
   }) async {
     _sourceId = sourceId;
-    _range = range;
+    _range = range ?? _range ?? _defaultRange();
     _type = type;
     state = const AsyncLoading();
     state = await AsyncValue.guard(_reload);
@@ -99,5 +100,11 @@ class TransactionsController extends AsyncNotifier<PaginatedTransactionsState> {
       type: _type,
       totalCount: _allFiltered.length,
     );
+  }
+
+  static DateRange _defaultRange({DateTime? now}) {
+    final end = (now ?? DateTime.now()).toUtc();
+    final start = end.subtract(kDefaultTransactionsWindow);
+    return DateRange(start: start, end: end);
   }
 }

@@ -222,3 +222,27 @@ async def test_integration_real_futu_positions_env_gated() -> None:
     with request_trade_password(trade_password):
         positions = await adapter.list_positions()
     assert len(positions) >= 1
+
+
+@pytest.mark.asyncio
+async def test_integration_real_futu_transactions_env_gated() -> None:
+    host = os.getenv("FUTU_OPEND_HOST")
+    port_raw = os.getenv("FUTU_OPEND_PORT")
+    trade_password = os.getenv("FUTU_TRADE_PASSWORD")
+    if not (host and port_raw and trade_password):
+        pytest.skip("FUTU_OPEND_HOST/FUTU_OPEND_PORT/FUTU_TRADE_PASSWORD not set")
+
+    pytest.importorskip("futu")
+    try:
+        port = int(port_raw)
+    except ValueError:
+        pytest.skip("FUTU_OPEND_PORT is not an integer")
+
+    client = FutuOpenDClient(host=host, port=port)
+    adapter = FutuAdapter(
+        client,
+        retry=RetryPolicy(max_attempts=2, initial_delay=0.1, jitter=0.0),
+    )
+    with request_trade_password(trade_password):
+        txs = await adapter.list_transactions(limit=20)
+    assert len(txs) >= 1

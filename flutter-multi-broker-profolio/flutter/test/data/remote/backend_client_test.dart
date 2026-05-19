@@ -199,11 +199,11 @@ void main() {
       await client.getTransactions(
         sourceId: 'lb',
         start: DateTime.utc(2025, 1, 1),
-        end: DateTime.utc(2025, 12, 31),
+        limit: 200,
       );
-      expect(seenUrl.queryParameters['sourceId'], 'lb');
-      expect(seenUrl.queryParameters['start'], '2025-01-01T00:00:00.000Z');
-      expect(seenUrl.queryParameters['end'], '2025-12-31T00:00:00.000Z');
+      expect(seenUrl.queryParameters['source'], 'lb');
+      expect(seenUrl.queryParameters['since'], '2025-01-01T00:00:00.000Z');
+      expect(seenUrl.queryParameters['limit'], '200');
     });
 
     test('CRUD endpoints use correct HTTP verbs', () async {

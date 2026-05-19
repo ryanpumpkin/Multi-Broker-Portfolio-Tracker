@@ -267,7 +267,7 @@ void main() {
 
   group('transactionsProvider', () {
     test('paginates and filters transactions', () async {
-      final now = DateTime.utc(2026, 1, 10);
+      final now = DateTime.now().toUtc();
       final txs = List<Transaction>.generate(60, (i) {
         return Transaction(
           id: 't$i',
@@ -290,8 +290,15 @@ void main() {
       addTearDown(container.dispose);
 
       final firstPage = await container.read(transactionsProvider.future);
-      expect(firstPage.items, hasLength(50));
-      expect(firstPage.hasMore, isTrue);
+      expect(firstPage.totalCount, inInclusiveRange(30, 31));
+      expect(firstPage.hasMore, isFalse);
+
+      await container.read(transactionsProvider.notifier).applyFilters(
+            range: DateRange(start: now.subtract(const Duration(days: 90)), end: now),
+          );
+      final paged = container.read(transactionsProvider).value!;
+      expect(paged.items, hasLength(50));
+      expect(paged.hasMore, isTrue);
 
       await container.read(transactionsProvider.notifier).loadNextPage();
       final secondPage = container.read(transactionsProvider).value!;
@@ -301,7 +308,7 @@ void main() {
       await container.read(transactionsProvider.notifier).applyFilters(
             sourceId: 'lb',
             type: TransactionType.buy,
-            range: DateRange(start: DateTime.utc(2026, 1, 1), end: now),
+            range: DateRange(start: now.subtract(const Duration(days: 9)), end: now),
           );
       final filtered = container.read(transactionsProvider).value!;
       expect(filtered.items.every((tx) => tx.sourceId == 'lb'), isTrue);
