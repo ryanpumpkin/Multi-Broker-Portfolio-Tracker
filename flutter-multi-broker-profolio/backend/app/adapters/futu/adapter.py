@@ -213,6 +213,19 @@ class FutuAdapter(SourceAdapter):
 
     @asynccontextmanager
     async def _unlocked(self) -> AsyncIterator[None]:
+        """Unlock → body → lock lifecycle guard.
+
+        Reads the trade password from the per-request ContextVar (set by
+        ``request_trade_password``).  If no password is in context the body
+        runs without unlocking — useful for read-only calls that do not need
+        the trade context.
+
+        If ``unlock_trade`` raises (wrong password, network error, etc.) the
+        exception propagates and ``lock_trade`` is intentionally **not**
+        called; the trade context was never successfully unlocked so there is
+        nothing to lock.  The password is never stored on the adapter instance
+        and is gone when the ContextVar resets at the end of the request.
+        """
         password = self._unlock_password_provider()
         if password is None:
             yield
