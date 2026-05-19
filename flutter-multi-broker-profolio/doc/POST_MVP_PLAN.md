@@ -82,7 +82,7 @@ print credentials-adjacent data if response shapes ever change.
 
 ## Item 2 — Wire the other three brokers end-to-end
 
-**Slice id:** `broker-integration-binance` `[~]`, `broker-integration-ibkr` `[~]`, `broker-integration-futu` `[~]`
+**Slice id:** `broker-integration-binance` `[x]`, `broker-integration-ibkr` `[x]`, `broker-integration-futu` `[~]`
 
 LongBridge is fully wired. The other three brokers have working
 SDK clients and adapters, but no one has driven a real
