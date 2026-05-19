@@ -7,6 +7,7 @@ import base64
 import hashlib
 import inspect
 import json
+import logging
 import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -329,6 +330,7 @@ class FirestoreConnectionVaultStore:
     ) -> None:
         self._firestore_client = firestore_client
         self._fallback = fallback or InMemoryConnectionVaultStore()
+        self._log = logging.getLogger("mbp.vault")
 
     async def put(self, record: ConnectionCredentialRecord) -> ConnectionCredentialRecord:
         client = self._client()
@@ -365,8 +367,7 @@ class FirestoreConnectionVaultStore:
     async def list_for_user(self, *, user_id: str) -> list[ConnectionCredentialRecord]:
         client = self._client()
         if client is None:
-            import logging
-            logging.getLogger("mbp.vault").warning(
+            self._log.warning(
                 "list_for_user: Firestore client is None — falling back to in-memory store",
             )
             return await self._fallback.list_for_user(user_id=user_id)
@@ -384,12 +385,12 @@ class FirestoreConnectionVaultStore:
                 docs = list(snap)
             except TypeError:
                 docs = list(getattr(snap, "docs", []) or [])
-            import logging
-            logging.getLogger("mbp.vault").info(
-                "list_for_user uid=%s firestore_docs=%d",
-                user_id,
-                len(docs),
-            )
+            if self._log.isEnabledFor(logging.DEBUG):
+                self._log.debug(
+                    "list_for_user uid=%s firestore_docs=%d",
+                    user_id,
+                    len(docs),
+                )
             out: list[ConnectionCredentialRecord] = []
             for doc in docs:
                 payload = _safe_to_dict(doc)
@@ -407,9 +408,8 @@ class FirestoreConnectionVaultStore:
                 )
             return out
         except Exception as exc:
-            import logging
             import traceback
-            logging.getLogger("mbp.vault").error(
+            self._log.error(
                 "list_for_user uid=%s firestore_read_failed: %s\n%s",
                 user_id,
                 exc,

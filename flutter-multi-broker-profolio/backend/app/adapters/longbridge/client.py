@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 import types
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.adapters._common import PermanentError, TransientError
+
+_LOG = logging.getLogger("mbp.longbridge.client")
 
 
 @dataclass(slots=True)
@@ -54,15 +57,9 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         # each with its own `.positions`. Some older SDK versions
         # returned the list directly, so we handle both shapes.
         result = await _to_thread(self._trade_ctx.stock_positions)
-        import logging
-        log = logging.getLogger("mbp.longbridge.client")
-        log.info(
-            "stock_positions raw response type=%s repr=%s",
-            type(result).__name__,
-            repr(result)[:1500],
-        )
         channels = _to_iterable(result, attribute="channels")
-        log.info("stock_positions channel_count=%d", len(channels))
+        if _LOG.isEnabledFor(logging.DEBUG):
+            _LOG.debug("stock_positions channel_count=%d", len(channels))
         raw_rows: list[Any] = []
         for idx, channel in enumerate(channels):
             ch_name = getattr(channel, "account_channel", None) or getattr(
@@ -70,12 +67,13 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
             )
             positions = getattr(channel, "positions", None)
             n = len(list(positions)) if positions is not None else 0
-            log.info(
-                "stock_positions channel[%d] name=%s positions=%d",
-                idx,
-                ch_name,
-                n,
-            )
+            if _LOG.isEnabledFor(logging.DEBUG):
+                _LOG.debug(
+                    "stock_positions channel[%d] name=%s positions=%d",
+                    idx,
+                    ch_name,
+                    n,
+                )
             if positions is None:
                 raw_rows.append(channel)
                 continue
@@ -89,19 +87,18 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         ]
         price_by_symbol: dict[str, Any] = {}
         if symbols:
-            import logging
-            log = logging.getLogger("mbp.longbridge.client")
             try:
                 quotes = await _to_thread(self._quote_ctx.quote, symbols)
                 # Try both the documented attribute name and the bare list
                 # shape; older SDK versions returned the list directly.
                 quote_iter = _to_iterable(quotes, attribute="secu_quote")
-                log.info(
-                    "quote-enrich: symbols=%s quote_count=%d quotes_type=%s",
-                    symbols,
-                    len(quote_iter),
-                    type(quotes).__name__,
-                )
+                if _LOG.isEnabledFor(logging.DEBUG):
+                    _LOG.debug(
+                        "quote-enrich: symbols=%s quote_count=%d quotes_type=%s",
+                        symbols,
+                        len(quote_iter),
+                        type(quotes).__name__,
+                    )
                 for q in quote_iter:
                     sym = getattr(q, "symbol", None) or (
                         q.get("symbol") if isinstance(q, dict) else None
@@ -111,9 +108,10 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
                     )
                     if sym and price is not None:
                         price_by_symbol[str(sym)] = price
-                log.info("quote-enrich: prices_resolved=%s", price_by_symbol)
+                if _LOG.isEnabledFor(logging.DEBUG):
+                    _LOG.debug("quote-enrich: prices_resolved=%s", price_by_symbol)
             except Exception as exc:  # noqa: BLE001 - quote enrichment is best-effort
-                log.warning("quote-enrich failed: %s", exc, exc_info=True)
+                _LOG.warning("quote-enrich failed: %s", exc, exc_info=True)
 
         # Convert each SDK position to a dict so we can reliably merge in
         # the live price. The SDK returns immutable (slotted) dataclasses,
