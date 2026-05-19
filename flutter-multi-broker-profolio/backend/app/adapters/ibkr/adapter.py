@@ -360,11 +360,21 @@ class IbkrAdapter(SourceAdapter):
         self._health.record_success()
         return result
 
+    async def _tickle_before_request(self) -> None:
+        async def _tickle() -> None:
+            ok = await self._client.tickle()
+            if not ok:
+                raise TransientError("tickle returned false")
+
+        await self._call(_tickle)
+
     async def list_positions(self) -> list[Position]:
+        await self._tickle_before_request()
         raw = await self._call(self._client.fetch_positions)
         return [_map_position(item) for item in raw]
 
     async def list_balances(self) -> list[CashBalance]:
+        await self._tickle_before_request()
         raw = await self._call(self._client.fetch_account_summary)
         return [_map_balance(item) for item in raw]
 
@@ -377,10 +387,12 @@ class IbkrAdapter(SourceAdapter):
         async def _do() -> list[dict[str, Any]]:
             return await self._client.fetch_executions(since=since, limit=limit)
 
+        await self._tickle_before_request()
         raw = await self._call(_do)
         return [_map_transaction(item) for item in raw]
 
     async def stream_quotes(self, symbols: Iterable[str]) -> AsyncIterator[Quote]:
+        await self._tickle_before_request()
         async for raw in self._client.stream_market_data(list(symbols)):
             yield _map_quote(raw)
 

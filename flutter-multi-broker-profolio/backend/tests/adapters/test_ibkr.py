@@ -95,6 +95,7 @@ async def test_positions_and_balances_mapping() -> None:
 
     balances = await adapter.list_balances()
     assert balances[0].amount == Decimal("1000")
+    assert client.tickle_calls == 2
 
 
 @pytest.mark.asyncio
@@ -146,6 +147,7 @@ async def test_transactions_mapping() -> None:
     assert txs[0].side == "buy"
     assert txs[0].transaction_id == "exec-1"
     assert txs[0].timestamp.year == 2023
+    assert client.tickle_calls == 1
 
 
 @pytest.mark.asyncio
@@ -156,6 +158,20 @@ async def test_stream_quotes() -> None:
     adapter = IbkrAdapter(client, retry=_no_jitter())
     out = [q async for q in adapter.stream_quotes(["AAPL"])]
     assert out[0].price == Decimal("170")
+    assert client.tickle_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_request_paths_fail_when_tickle_returns_false() -> None:
+    client = FakeIbkrClient(
+        positions=[
+            {"acctId": "U1", "contractDesc": "AAPL", "position": "1", "currency": "USD"},
+        ],
+        tickle_result=False,
+    )
+    adapter = IbkrAdapter(client, retry=_no_jitter())
+    with pytest.raises(TransientError, match="tickle returned false"):
+        await adapter.list_positions()
 
 
 @pytest.mark.asyncio
