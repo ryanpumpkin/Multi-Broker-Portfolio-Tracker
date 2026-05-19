@@ -55,20 +55,21 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         # returned the list directly, so we handle both shapes.
         result = await _to_thread(self._trade_ctx.stock_positions)
         channels = _to_iterable(result, attribute="channels")
-        rows: list[Any] = []
+        raw_rows: list[Any] = []
         for channel in channels:
             positions = getattr(channel, "positions", None)
             if positions is None:
-                rows.append(channel)
+                raw_rows.append(channel)
                 continue
-            rows.extend(list(positions))
+            raw_rows.extend(list(positions))
 
         # The trade-side `stock_positions` endpoint returns `last_price: null`
         # for many positions. Fetch live quotes for the symbols and inject the
         # price so the aggregator can compute market_value and unrealized_pnl.
         symbols = [
-            str(getattr(p, "symbol", "")) for p in rows if getattr(p, "symbol", None)
+            str(getattr(p, "symbol", "")) for p in raw_rows if getattr(p, "symbol", None)
         ]
+        price_by_symbol: dict[str, Any] = {}
         if symbols:
             import logging
             log = logging.getLogger("mbp.longbridge.client")
@@ -83,7 +84,6 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
                     len(quote_iter),
                     type(quotes).__name__,
                 )
-                price_by_symbol: dict[str, Any] = {}
                 for q in quote_iter:
                     sym = getattr(q, "symbol", None) or (
                         q.get("symbol") if isinstance(q, dict) else None
@@ -94,25 +94,24 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
                     if sym and price is not None:
                         price_by_symbol[str(sym)] = price
                 log.info("quote-enrich: prices_resolved=%s", price_by_symbol)
-
-                # Patch each position with the live price under both
-                # `last_price` and `last_done` so downstream code that
-                # looks up either key picks it up. Skip silently if the
-                # position object is read-only (e.g. an SDK dataclass).
-                for p in rows:
-                    sym = str(getattr(p, "symbol", "") or "")
-                    if sym not in price_by_symbol:
-                        continue
-                    price = price_by_symbol[sym]
-                    for attr in ("last_price", "last_done"):
-                        try:
-                            setattr(p, attr, price)
-                        except (AttributeError, TypeError):
-                            pass
             except Exception as exc:  # noqa: BLE001 - quote enrichment is best-effort
                 log.warning("quote-enrich failed: %s", exc, exc_info=True)
 
-        return rows
+        # Convert each SDK position to a dict so we can reliably merge in
+        # the live price. The SDK returns immutable (slotted) dataclasses,
+        # so setattr() silently fails — and the adapter would then see
+        # null last_price and fall back to cost-basis. Building a fresh
+        # dict guarantees the merged price is visible downstream.
+        out: list[dict[str, Any]] = []
+        for raw in raw_rows:
+            row = _position_to_dict(raw)
+            sym = str(row.get("symbol") or "")
+            live = price_by_symbol.get(sym)
+            if live is not None:
+                row["last_price"] = live
+                row["last_done"] = live
+            out.append(row)
+        return out
 
     async def list_balances(self) -> list[Any]:
         # Same shape concern as list_positions: the response object
@@ -186,6 +185,48 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
                 payload.setdefault("timestamp", now)
                 yield payload
             await asyncio.sleep(self._quote_poll_interval)
+
+
+def _position_to_dict(raw: Any) -> dict[str, Any]:
+    """Snapshot an SDK position object into a plain dict.
+
+    The LongBridge SDK returns immutable (slotted) dataclasses, so
+    `setattr` silently fails when we try to inject a live price.
+    Cloning to a dict produces a mutable copy the adapter can read
+    via dict-style access AND lets us drop in merged fields.
+
+    If `raw` is already a dict, we pass it through. Otherwise we
+    enumerate the known fields from `_lookup` in the adapter.
+    """
+    if isinstance(raw, dict):
+        return dict(raw)
+    # Known fields the adapter looks for, plus a few aliases used by
+    # different LongBridge SDK versions.
+    field_names = (
+        "symbol",
+        "quantity",
+        "currency",
+        "cost_price",
+        "avg_cost",
+        "last_price",
+        "last_done",
+        "price",
+        "market_value",
+        "unrealized_pnl",
+        "market",
+        "exchange",
+        "account_no",
+        "account_id",
+        "account_channel",
+        "available_quantity",
+        "init_quantity",
+    )
+    out: dict[str, Any] = {}
+    for name in field_names:
+        value = getattr(raw, name, None)
+        if value is not None:
+            out[name] = value
+    return out
 
 
 def _to_iterable(
