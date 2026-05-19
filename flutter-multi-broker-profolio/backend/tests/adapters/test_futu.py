@@ -196,3 +196,239 @@ async def test_unlock_failure_propagates_and_relocks_skipped() -> None:
     assert client.unlock_calls >= 1
     # lock_trade is not called because unlock raised before entering the with body.
     assert client.lock_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Mapping verification against real SDK response shapes (doc/BROKER_INTEGRATION_DETAILS.md §C.4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_positions_sdk_shape_hk_stock() -> None:
+    """Verify HK stock position row (market prefix kept for symbol, pl_ratio ignored)."""
+    client = FakeFutuClient(
+        positions=[
+            {
+                "position_side": "LONG",
+                "code": "HK.00700",
+                "stock_name": "騰訊控股",
+                "qty": 100,
+                "can_sell_qty": 100,
+                "currency": "HKD",
+                "nominal_price": 500.50,
+                "cost_price": 480.30,
+                "market_val": 50050.00,
+                "pl_val": 2020.00,
+                "pl_ratio": 4.21,
+            }
+        ]
+    )
+    adapter = FutuAdapter(client, retry=_no_jitter())
+    positions = await adapter.list_positions()
+
+    assert len(positions) == 1
+    p = positions[0]
+    assert p.source == "futu"
+    assert p.symbol == "HK.00700"
+    assert p.currency == "HKD"
+    assert p.quantity == Decimal("100")
+    assert p.last_price == Decimal("500.5")
+    assert p.avg_cost == Decimal("480.3")
+    assert p.market_value == Decimal("50050.00")
+    assert p.unrealized_pnl == Decimal("2020.00")
+    # pl_ratio is not in the domain model; no error when present in raw row
+    assert p.account_id is None
+
+
+@pytest.mark.asyncio
+async def test_list_positions_sdk_shape_us_stock() -> None:
+    """Verify US stock position row."""
+    client = FakeFutuClient(
+        positions=[
+            {
+                "position_side": "LONG",
+                "code": "US.AAPL",
+                "stock_name": "Apple Inc",
+                "qty": 50,
+                "can_sell_qty": 50,
+                "currency": "USD",
+                "nominal_price": 180.20,
+                "cost_price": 175.50,
+                "market_val": 9010.00,
+                "pl_val": 235.00,
+                "pl_ratio": 2.68,
+            }
+        ]
+    )
+    adapter = FutuAdapter(client, retry=_no_jitter())
+    positions = await adapter.list_positions()
+
+    assert len(positions) == 1
+    p = positions[0]
+    assert p.symbol == "US.AAPL"
+    assert p.currency == "USD"
+    assert p.quantity == Decimal("50")
+    assert p.last_price == Decimal("180.2")
+    assert p.avg_cost == Decimal("175.5")
+    assert p.market_value == Decimal("9010.00")
+    assert p.unrealized_pnl == Decimal("235.00")
+
+
+@pytest.mark.asyncio
+async def test_list_positions_empty_dataframe_returns_empty_list() -> None:
+    """Empty position list (0, N) shape should return [] without error."""
+    client = FakeFutuClient(positions=[])
+    adapter = FutuAdapter(client, retry=_no_jitter())
+    positions = await adapter.list_positions()
+    assert positions == []
+
+
+@pytest.mark.asyncio
+async def test_list_balances_sdk_shape_uses_available_funds() -> None:
+    """accinfo_query row: use available_funds (not cash)."""
+    client = FakeFutuClient(
+        accounts=[
+            {
+                "currency": "HKD",
+                "cash": 50000.00,
+                "total_assets": 51500.00,
+                "available_funds": 49500.00,  # should use this, not cash
+                "frozen_cash": 500.00,
+                "market_val": 1500.00,
+                "realized_pl": 0.00,
+                "unrealized_pl": 150.00,
+            }
+        ]
+    )
+    adapter = FutuAdapter(client, retry=_no_jitter())
+    balances = await adapter.list_balances()
+
+    assert len(balances) == 1
+    b = balances[0]
+    assert b.source == "futu"
+    assert b.currency == "HKD"
+    assert b.amount == Decimal("49500.00")
+
+
+@pytest.mark.asyncio
+async def test_list_balances_multiple_currencies() -> None:
+    """accinfo_query returns one row per currency; all should be returned."""
+    client = FakeFutuClient(
+        accounts=[
+            {
+                "currency": "HKD",
+                "cash": 50000.00,
+                "available_funds": 50000.00,
+            },
+            {
+                "currency": "USD",
+                "cash": 10000.00,
+                "available_funds": 9800.00,
+            },
+        ]
+    )
+    adapter = FutuAdapter(client, retry=_no_jitter())
+    balances = await adapter.list_balances()
+
+    assert len(balances) == 2
+    currencies = {b.currency for b in balances}
+    assert currencies == {"HKD", "USD"}
+    by_currency = {b.currency: b for b in balances}
+    assert by_currency["HKD"].amount == Decimal("50000.00")
+    assert by_currency["USD"].amount == Decimal("9800.00")
+
+
+@pytest.mark.asyncio
+async def test_list_balances_falls_back_to_cash_when_available_funds_missing() -> None:
+    """When available_funds is absent, fall back to cash."""
+    client = FakeFutuClient(
+        accounts=[{"currency": "SGD", "cash": 8000.00}]
+    )
+    adapter = FutuAdapter(client, retry=_no_jitter())
+    balances = await adapter.list_balances()
+    assert balances[0].currency == "SGD"
+    assert balances[0].amount == Decimal("8000.00")
+
+
+@pytest.mark.asyncio
+async def test_unlock_lifecycle_calls_lock_after_success() -> None:
+    """Verify unlock → query → lock sequence runs exactly once per call."""
+    client = FakeFutuClient(
+        positions=[
+            {
+                "code": "HK.00001",
+                "qty": "10",
+                "currency": "HKD",
+                "nominal_price": "10",
+                "cost_price": "9",
+                "market_val": "100",
+                "pl_val": "10",
+            }
+        ]
+    )
+    adapter = FutuAdapter(client, retry=_no_jitter())
+    with request_trade_password("s3cret"):
+        await adapter.list_positions()
+
+    assert client.unlock_calls == 1
+    assert client.lock_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unlock_lifecycle_no_password_skips_unlock_and_lock() -> None:
+    """With no trade password in context, unlock/lock must not be called."""
+    client = FakeFutuClient(
+        accounts=[{"currency": "HKD", "available_funds": "1000"}]
+    )
+    adapter = FutuAdapter(client, retry=_no_jitter())
+    # No request_trade_password context → no unlock
+    await adapter.list_balances()
+    assert client.unlock_calls == 0
+    assert client.lock_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unlock_password_not_accessible_outside_context() -> None:
+    """Trade password context var must be None outside the request_trade_password block."""
+    from app.adapters.futu import get_request_trade_password
+
+    # Before setting
+    assert get_request_trade_password() is None
+
+    with request_trade_password("pw"):
+        assert get_request_trade_password() == "pw"
+
+    # After exiting the context, it must be reset
+    assert get_request_trade_password() is None
+
+
+@pytest.mark.asyncio
+async def test_history_deals_sdk_shape() -> None:
+    """history_deal_list_query row maps correctly to Transaction."""
+    client = FakeFutuClient(
+        orders=[
+            {
+                "trd_side": "BUY",
+                "order_id": "20260501000001",
+                "deal_id": "20260501999999",
+                "code": "HK.00700",
+                "stock_name": "騰訊控股",
+                "qty": 100,
+                "price": 480.30,
+                "create_time": "2026-05-01 10:15:20",
+                "acc_id": 42,
+            }
+        ]
+    )
+    adapter = FutuAdapter(client, retry=_no_jitter())
+    txs = await adapter.list_transactions()
+
+    assert len(txs) == 1
+    t = txs[0]
+    assert t.source == "futu"
+    assert t.transaction_id == "20260501000001"
+    assert t.symbol == "HK.00700"
+    assert t.side == "buy"
+    assert t.quantity == Decimal("100")
+    assert t.price == Decimal("480.30")
+    assert t.account_id == "42"
