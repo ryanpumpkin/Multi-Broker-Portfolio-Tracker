@@ -159,22 +159,28 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         since: str | None,
         limit: int | None,
     ) -> list[Any]:
-        # LongBridge executions endpoint is "today" scoped. The response
-        # may be a `TodayExecutionsResponse` with `.trades` (newer SDK)
-        # or a bare iterable of executions (older SDK).
-        result = await _to_thread(self._trade_ctx.today_executions)
-        rows = list(_to_iterable(result, attribute="trades"))
+        """Fetch historical executions using `history_executions`.
 
-        if since is not None:
-            threshold = _parse_since(since)
-            kept: list[Any] = []
-            for row in rows:
-                timestamp = _row_timestamp(row)
-                if timestamp is None or timestamp >= threshold:
-                    kept.append(row)
-            rows = kept
-        if limit is not None and limit >= 0:
-            rows = rows[:limit]
+        Falls back to `today_executions` if the historical endpoint is not
+        available on the installed SDK version.
+
+        Strategy:
+        - Default window: last 90 days when `since` is None.
+        - Calls `history_executions(symbol=None, start_at=start, end_at=now)`.
+        - Pages until fewer than `_PAGE_SIZE` rows are returned or 5 000 total
+          rows are accumulated (hard cap).
+        """
+        from datetime import timedelta
+
+        now = datetime.now(UTC)
+        start = _parse_since(since) if since is not None else (now - timedelta(days=90))
+
+        rows = await _fetch_history_executions_paged(
+            self._trade_ctx,
+            start=start,
+            end=now,
+            limit=limit,
+        )
         return rows
 
     async def ping(self) -> bool:
