@@ -225,7 +225,7 @@ session that the user must supply.
 
 ## Item 3 — Historical transaction sync
 
-**Slice id:** `transactions-history` `[~]`
+**Slice id:** `transactions-history` `[x]`
 
 **Why:** Today only "today's" executions are returned. The
 Transactions screen is wired but empty. Each broker has a
@@ -273,7 +273,7 @@ historical executions endpoint we aren't using:
 
 ## Item 4 — Live quote streaming via WebSocket
 
-**Slice id:** `live-quote-streaming`
+**Slice id:** `live-quote-streaming` `[~]`
 
 **Why:** The proposal §6 calls for real-time quotes via
 WebSocket. The infrastructure is scaffolded (`QuotesStream` on
