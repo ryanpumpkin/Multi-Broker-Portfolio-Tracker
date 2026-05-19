@@ -30,6 +30,21 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     super.dispose();
   }
 
+  Future<void> _submit() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(authProvider.notifier).signIn(
+            email: _email.text.trim(),
+            password: _password.text,
+          );
+      widget.onSignedIn?.call();
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
@@ -44,33 +59,21 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
               key: const Key('sign_in_email'),
               controller: _email,
               keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.next,
               decoration: const InputDecoration(labelText: 'Email'),
             ),
             TextField(
               key: const Key('sign_in_password'),
               controller: _password,
               obscureText: true,
+              textInputAction: TextInputAction.done,
+              onSubmitted: loading ? null : (_) => _submit(),
               decoration: const InputDecoration(labelText: 'Password'),
             ),
             const SizedBox(height: 16),
             FilledButton(
               key: const Key('sign_in_submit'),
-              onPressed: loading
-                  ? null
-                  : () async {
-                      final messenger = ScaffoldMessenger.of(context);
-                      try {
-                        await ref.read(authProvider.notifier).signIn(
-                              email: _email.text.trim(),
-                              password: _password.text,
-                            );
-                        widget.onSignedIn?.call();
-                      } catch (error) {
-                        messenger.showSnackBar(
-                          SnackBar(content: Text(error.toString())),
-                        );
-                      }
-                    },
+              onPressed: loading ? null : _submit,
               child: const Text('Sign in'),
             ),
             TextButton(

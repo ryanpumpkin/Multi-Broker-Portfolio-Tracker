@@ -26,6 +26,22 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
     super.dispose();
   }
 
+  Future<void> _submit() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(authProvider.notifier)
+          .sendPasswordResetEmail(email: _email.text.trim());
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Password reset email sent.')),
+      );
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -38,28 +54,14 @@ class _PasswordResetScreenState extends ConsumerState<PasswordResetScreen> {
               key: const Key('password_reset_email'),
               controller: _email,
               keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
               decoration: const InputDecoration(labelText: 'Email'),
             ),
             const SizedBox(height: 16),
             FilledButton(
               key: const Key('password_reset_submit'),
-              onPressed: () async {
-                final messenger = ScaffoldMessenger.of(context);
-                try {
-                  await ref
-                      .read(authProvider.notifier)
-                      .sendPasswordResetEmail(email: _email.text.trim());
-                  messenger.showSnackBar(
-                    const SnackBar(
-                      content: Text('Password reset email sent.'),
-                    ),
-                  );
-                } catch (error) {
-                  messenger.showSnackBar(
-                    SnackBar(content: Text(error.toString())),
-                  );
-                }
-              },
+              onPressed: _submit,
               child: const Text('Send reset email'),
             ),
           ],
