@@ -120,11 +120,14 @@ def _map_position(raw: dict[str, Any]) -> Position:
 
 
 def _map_balance(raw: dict[str, Any]) -> CashBalance:
+    # Prefer `available_funds` (uninvested cash) over `cash` (which includes
+    # locked amounts). Fall back to `cash` for payloads that only carry one.
+    amount_raw = raw.get("available_funds") if raw.get("available_funds") is not None else raw["cash"]
     return CashBalance(
         source=SOURCE_NAME,
         account_id=str(raw["acc_id"]) if "acc_id" in raw else None,
         currency=raw["currency"],
-        amount=_dec(raw["cash"]),
+        amount=_dec(amount_raw),
     )
 
 

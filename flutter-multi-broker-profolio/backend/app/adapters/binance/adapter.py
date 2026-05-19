@@ -40,6 +40,13 @@ from app.models.domain import (
 
 SOURCE_NAME = "binance"
 
+# Assets treated as cash (stablecoins / fiat on-chain) — kept as CashBalance,
+# not mapped to Position.  Extended beyond USDT/USDC/BUSD to cover FDUSD,
+# TUSD, DAI, and USDP which are all USD-pegged and commonly held on Binance.
+STABLECOINS: frozenset[str] = frozenset(
+    {"USDT", "USDC", "BUSD", "FDUSD", "TUSD", "DAI", "USDP", "USD"}
+)
+
 
 class BinanceHost(StrEnum):
     """Which Binance deployment to talk to."""
@@ -107,6 +114,8 @@ class BinanceClient(Protocol):
         interval: str,
         limit: int,
     ) -> list[Any]: ...
+
+    async def get_symbol_ticker(self, *, symbol: str) -> dict[str, Any]: ...
 
     async def get_ticker_prices(self, symbols: list[str]) -> list[dict[str, Any]]: ...
 

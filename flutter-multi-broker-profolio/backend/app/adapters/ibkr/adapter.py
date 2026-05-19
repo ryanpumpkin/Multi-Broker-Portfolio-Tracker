@@ -152,6 +152,7 @@ class IBKRClient:
             out.append(
                 {
                     "acctId": getattr(row, "account", None),
+                    "secType": getattr(contract, "secType", None),
                     "contractDesc": getattr(contract, "localSymbol", None)
                     or getattr(contract, "symbol", None),
                     "listingExchange": getattr(contract, "primaryExchange", None)
@@ -270,7 +271,10 @@ def _dec(v: Any) -> Decimal:
 def _opt_dec(v: Any) -> Decimal | None:
     if v is None or v == "":
         return None
-    return Decimal(str(v))
+    s = str(v).strip().lower()
+    if s in {"nan", "inf", "-inf", "infinity", "-infinity"}:
+        return None
+    return Decimal(s)
 
 
 def _parse_ts(value: Any) -> datetime:
@@ -361,10 +365,35 @@ class IbkrAdapter(SourceAdapter):
         return result
 
     async def list_positions(self) -> list[Position]:
+        # Tickle the gateway to keep the session alive (per-request model;
+        # replaces the per-process start_keepalive loop which is inappropriate
+        # for per-request adapters — see ARCHITECTURE_NOTES §3).
+        await self._client.tickle()
         raw = await self._call(self._client.fetch_positions)
-        return [_map_position(item) for item in raw]
+        positions: list[Position] = []
+        for item in raw:
+            # v1 scope: equities only — filter out OPT, FUT, CASH, CRYPTO, etc.
+            sec_type = item.get("secType")
+            if sec_type is not None and sec_type != "STK":
+                continue
+            pos = _map_position(item)
+            # Market-value three-tier fallback (ARCHITECTURE_NOTES §5):
+            #   explicit mktValue -> last_price * quantity -> avg_cost * quantity
+            if pos.market_value is None:
+                if pos.last_price is not None:
+                    pos = pos.model_copy(
+                        update={"market_value": pos.last_price * pos.quantity}
+                    )
+                elif pos.avg_cost is not None:
+                    pos = pos.model_copy(
+                        update={"market_value": pos.avg_cost * pos.quantity}
+                    )
+            positions.append(pos)
+        return positions
 
     async def list_balances(self) -> list[CashBalance]:
+        # Tickle the gateway to keep the session alive (per-request model).
+        await self._client.tickle()
         raw = await self._call(self._client.fetch_account_summary)
         return [_map_balance(item) for item in raw]
 
