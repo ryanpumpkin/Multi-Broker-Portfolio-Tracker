@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from decimal import Decimal
 from typing import Any
@@ -10,6 +11,7 @@ import pytest
 
 from app.adapters._common import PermanentError, RetryPolicy
 from app.adapters.futu import FutuAdapter, request_trade_password
+from app.adapters.futu.client import FutuOpenDClient
 from app.models.domain import SourceHealthStatus
 
 
@@ -196,3 +198,27 @@ async def test_unlock_failure_propagates_and_relocks_skipped() -> None:
     assert client.unlock_calls >= 1
     # lock_trade is not called because unlock raised before entering the with body.
     assert client.lock_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_integration_real_futu_positions_env_gated() -> None:
+    host = os.getenv("FUTU_OPEND_HOST")
+    port_raw = os.getenv("FUTU_OPEND_PORT")
+    trade_password = os.getenv("FUTU_TRADE_PASSWORD")
+    if not (host and port_raw and trade_password):
+        pytest.skip("FUTU_OPEND_HOST/FUTU_OPEND_PORT/FUTU_TRADE_PASSWORD not set")
+
+    pytest.importorskip("futu")
+    try:
+        port = int(port_raw)
+    except ValueError:
+        pytest.skip("FUTU_OPEND_PORT is not an integer")
+
+    client = FutuOpenDClient(host=host, port=port)
+    adapter = FutuAdapter(
+        client,
+        retry=RetryPolicy(max_attempts=2, initial_delay=0.1, jitter=0.0),
+    )
+    with request_trade_password(trade_password):
+        positions = await adapter.list_positions()
+    assert len(positions) >= 1

@@ -45,6 +45,17 @@ def test_factory_builds_binance_us_when_host_specified() -> None:
     assert adapter.host is BinanceHost.US
 
 
+def test_factory_builds_binance_us_when_region_specified() -> None:
+    factory = AdapterFactory()
+    adapter = factory.for_connection(
+        connection_kind="binance",
+        plaintext_creds=json.dumps({"api_key": "k", "api_secret": "s", "region": "us"}),
+    )
+
+    assert isinstance(adapter, BinanceAdapter)
+    assert adapter.host is BinanceHost.US
+
+
 def test_factory_rejects_invalid_credential_json() -> None:
     factory = AdapterFactory()
     with pytest.raises(AdapterCredentialError):
@@ -212,3 +223,35 @@ def test_factory_futu_ignores_non_numeric_acc_id(stub_futu_sdk: None) -> None:
     )
     assert isinstance(adapter, FutuAdapter)
 
+
+@pytest.mark.asyncio
+async def test_factory_futu_unlock_password_provider_from_credentials(
+    stub_futu_sdk: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.adapters.futu.client import FutuOpenDClient
+
+    unlocked_with: list[str] = []
+
+    async def _unlock_trade(self: FutuOpenDClient, password: str) -> None:
+        unlocked_with.append(password)
+
+    async def _lock_trade(self: FutuOpenDClient) -> None:
+        return None
+
+    async def _fetch_positions(self: FutuOpenDClient) -> list[dict[str, Any]]:
+        return [{"code": "HK.00700", "qty": "1", "currency": "HKD"}]
+
+    monkeypatch.setattr(FutuOpenDClient, "unlock_trade", _unlock_trade, raising=False)
+    monkeypatch.setattr(FutuOpenDClient, "lock_trade", _lock_trade, raising=False)
+    monkeypatch.setattr(FutuOpenDClient, "fetch_positions", _fetch_positions, raising=False)
+
+    factory = AdapterFactory()
+    adapter = factory.for_connection(
+        connection_kind="futu",
+        plaintext_creds=json.dumps({"tradeUnlockPassword": "unlock-123"}),
+    )
+
+    rows = await adapter.list_positions()
+    assert rows[0].symbol == "HK.00700"
+    assert unlocked_with == ["unlock-123"]

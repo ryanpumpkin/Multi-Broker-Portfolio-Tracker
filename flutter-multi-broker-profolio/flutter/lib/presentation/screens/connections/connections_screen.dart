@@ -26,7 +26,7 @@ const Map<ConnectionKind, List<(String, String, bool)>> _credentialFields = {
   ],
   ConnectionKind.futu: [
     ('account', 'Account', false),
-    ('password', 'Password', true),
+    ('tradeUnlockPassword', 'Trade Unlock Password', true),
     ('host', 'OpenD Host', false),
     ('port', 'OpenD Port', false),
   ],

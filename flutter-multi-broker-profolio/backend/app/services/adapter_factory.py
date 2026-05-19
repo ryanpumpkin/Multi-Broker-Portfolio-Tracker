@@ -78,8 +78,10 @@ def _parse_credential_json(raw: str) -> dict[str, Any]:
 def _build_binance_adapter(credentials: dict[str, Any]) -> SourceAdapter:
     api_key = _pick_str(credentials, "apiKey", "api_key")
     api_secret = _pick_str(credentials, "apiSecret", "api_secret")
-    host_raw = (_pick_optional_str(credentials, "host") or "binance.com").strip().lower()
-    if host_raw in {"binance.us", "us"}:
+    host_hint = _pick_optional_str(credentials, "host")
+    region_hint = _pick_optional_str(credentials, "region")
+    target = (host_hint or region_hint or "com").strip().lower()
+    if target in {"binance.us", "us"}:
         host = BinanceHost.US
     else:
         host = BinanceHost.COM
@@ -115,17 +117,27 @@ def _build_ibkr_adapter(credentials: dict[str, Any]) -> SourceAdapter:
 
 def _build_futu_adapter(credentials: dict[str, Any]) -> SourceAdapter:
     # The OpenD sidecar already holds account login. We accept optional
-    # acc_id + trd_env overrides; the trade unlock password is captured
-    # per-request via the credential context middleware.
+    # acc_id + trd_env overrides. Trade-unlock secret is resolved from
+    # request plaintext credentials (E2E-wrapped token) and injected via
+    # unlock_password_provider so the adapter never stores global state.
     from app.adapters.futu.adapter import FutuAdapter
     from app.adapters.futu.client import FutuOpenDClient
 
     acc_id_raw = _pick_optional_str(credentials, "accId", "acc_id")
     acc_id = int(acc_id_raw) if acc_id_raw and acc_id_raw.isdigit() else None
     trd_env = _pick_optional_str(credentials, "trdEnv", "trd_env")
+    unlock_password = _pick_optional_str(
+        credentials,
+        "tradeUnlockPassword",
+        "trade_unlock_password",
+        "unlockPassword",
+        "unlock_password",
+        # Backward compatibility for earlier Flutter forms.
+        "password",
+    )
 
     client = FutuOpenDClient(acc_id=acc_id, trd_env=trd_env)
-    return FutuAdapter(client)
+    return FutuAdapter(client, unlock_password_provider=lambda: unlock_password)
 
 
 def _pick_str(payload: dict[str, Any], *keys: str) -> str:
