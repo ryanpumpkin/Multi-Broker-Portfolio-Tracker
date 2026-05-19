@@ -54,20 +54,64 @@ class Mappers {
   // ---------------- Transaction ------------------------------------------
 
   static Transaction transactionFromJson(Map<String, dynamic> j) {
+    // Accept both camelCase (legacy fixtures / cache rows) and snake_case
+    // (backend wire shape per ARCHITECTURE_NOTES §9).
+    //
+    // Backend wire fields (snake_case):
+    //   transaction_id, source, timestamp, side, symbol, quantity, price,
+    //   currency, amount
+    // Legacy / cache fields (camelCase):
+    //   id, sourceId, time, type, symbol, quantity, price, currency, fee
+    final id = (j['id'] as String?) ??
+        (j['transaction_id'] as String?) ??
+        (j['transactionId'] as String?) ??
+        '';
+    final sourceId = (j['sourceId'] as String?) ??
+        (j['source'] as String?) ??
+        '';
+    final timeStr = (j['time'] as String?) ??
+        (j['timestamp'] as String?) ??
+        '1970-01-01T00:00:00Z';
+    final time = DateTime.parse(timeStr).toUtc();
+
+    // `type` field (camelCase) takes precedence over derived `side` (snake_case).
+    final typeStr = (j['type'] as String?) ?? _sideToType(j['side'] as String?);
+    final type = TransactionType.values.firstWhere(
+      (t) => t.name == typeStr,
+      orElse: () => TransactionType.buy,
+    );
+
     return Transaction(
-      id: j['id'] as String,
-      sourceId: j['sourceId'] as String,
-      time: DateTime.parse(j['time'] as String).toUtc(),
-      type: TransactionType.values.firstWhere(
-        (t) => t.name == (j['type'] as String? ?? 'buy'),
-        orElse: () => TransactionType.buy,
-      ),
-      symbol: j['symbol'] as String? ?? '',
+      id: id,
+      sourceId: sourceId,
+      time: time,
+      type: type,
+      symbol: (j['symbol'] as String?) ?? '',
       quantity: _num(j['quantity']),
       price: _num(j['price']),
-      currency: j['currency'] as String? ?? 'USD',
+      currency: (j['currency'] as String?) ?? 'USD',
       fee: _num(j['fee']),
     );
+  }
+
+  /// Map a backend ``side`` string to a [TransactionType] name.
+  static String _sideToType(String? side) {
+    switch (side?.toLowerCase()) {
+      case 'buy':
+      case 'bot':
+        return 'buy';
+      case 'sell':
+      case 'sld':
+        return 'sell';
+      case 'deposit':
+        return 'deposit';
+      case 'withdrawal':
+        return 'withdrawal';
+      case 'dividend':
+        return 'dividend';
+      default:
+        return 'buy';
+    }
   }
 
   // ---------------- CashBalance ------------------------------------------

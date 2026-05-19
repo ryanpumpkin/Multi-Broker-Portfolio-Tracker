@@ -97,3 +97,22 @@ async def test_region_routing_reaches_api(binance_adapter: object) -> None:
     assert health.status is SourceHealthStatus.OK, (
         f"Binance healthcheck failed: {health.message}"
     )
+
+
+@pytest.mark.asyncio
+async def test_list_transactions_returns_history(binance_adapter: object) -> None:
+    """With a real read-only key, list_transactions should return recent trades."""
+    from app.adapters.binance.adapter import BinanceAdapter
+
+    adapter = binance_adapter
+    assert isinstance(adapter, BinanceAdapter)
+
+    txs = await adapter.list_transactions(since=None, limit=None)
+    # An account may have no recent trades — that's valid.
+    # When transactions do exist, they must have the correct shape.
+    for tx in txs:
+        assert tx.source == "binance", f"Unexpected source: {tx!r}"
+        assert tx.timestamp is not None, f"Transaction missing timestamp: {tx!r}"
+        assert tx.side in {"buy", "sell", "deposit", "withdrawal"}, (
+            f"Unexpected side value: {tx.side!r}"
+        )

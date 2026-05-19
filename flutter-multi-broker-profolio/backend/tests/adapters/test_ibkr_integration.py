@@ -66,3 +66,22 @@ async def test_list_balances_returns_cash_balances() -> None:
     for bal in balances:
         assert bal.currency
         assert bal.amount is not None
+
+
+@pytest.mark.asyncio
+async def test_list_transactions_returns_historical_fills() -> None:
+    """With a running gateway, list_transactions should return recent fill executions."""
+    host = os.environ["IBKR_GATEWAY_HOST"]
+    port = int(os.getenv("IBKR_GATEWAY_PORT", "7497"))
+    account_id = os.getenv("IBKR_ACCOUNT_ID") or None
+
+    client = IBKRClient(host=host, port=port, account_id=account_id)
+    adapter = IbkrAdapter(client)
+
+    txs = await adapter.list_transactions(since=None, limit=None)
+    # An account may have no recent fills — that's valid.
+    # When transactions exist, verify shape.
+    for tx in txs:
+        assert tx.source == "ibkr", f"Unexpected source: {tx!r}"
+        assert tx.timestamp is not None, f"Transaction missing timestamp: {tx!r}"
+        assert tx.side in {"buy", "sell"}, f"Unexpected side value: {tx.side!r}"

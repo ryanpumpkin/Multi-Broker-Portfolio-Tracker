@@ -150,11 +150,21 @@ class FutuOpenDClient:  # pragma: no cover - SDK-bound; exercised via real OpenD
             trade_ctx.close()
 
     def _fetch_history_deals_sync(self, since: str | None) -> list[dict[str, Any]]:
+        from datetime import date, timedelta
+
         trade_ctx = self._trade_context()
         try:
             kwargs: dict[str, Any] = {"trd_env": self._trd_env()}
             if since:
-                kwargs["start"] = since
+                # Parse ISO date portion for the Futu SDK's start parameter.
+                try:
+                    start_date = date.fromisoformat(since[:10])
+                except ValueError:
+                    start_date = date.today() - timedelta(days=90)
+            else:
+                start_date = date.today() - timedelta(days=90)
+            kwargs["start"] = start_date.isoformat()
+            kwargs["end"] = date.today().isoformat()
             if self._acc_id is not None:
                 kwargs["acc_id"] = self._acc_id
             ret, frame = trade_ctx.history_deal_list_query(**kwargs)

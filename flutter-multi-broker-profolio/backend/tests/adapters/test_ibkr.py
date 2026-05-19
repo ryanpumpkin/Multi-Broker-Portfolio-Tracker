@@ -321,6 +321,47 @@ async def test_transactions_mapping() -> None:
 
 
 @pytest.mark.asyncio
+async def test_transactions_bot_sld_side_mapping() -> None:
+    """BOT/SLD (ib_insync fill side names) must map to 'buy'/'sell'."""
+    from app.adapters.ibkr.adapter import _map_ibkr_side
+
+    assert _map_ibkr_side("BOT") == "buy"
+    assert _map_ibkr_side("SLD") == "sell"
+    assert _map_ibkr_side("BUY") == "buy"
+    assert _map_ibkr_side("SELL") == "sell"
+    assert _map_ibkr_side(None) is None
+    assert _map_ibkr_side("UNKNOWN") == "unknown"
+
+    # Verify via adapter too.
+    client = FakeIbkrClient(
+        executions=[
+            {
+                "execId": "fill-1",
+                "symbol": "MSFT",
+                "side": "BOT",
+                "size": "5",
+                "price": "300",
+                "currency": "USD",
+                "time": 1700000000,
+            },
+            {
+                "execId": "fill-2",
+                "symbol": "MSFT",
+                "side": "SLD",
+                "size": "3",
+                "price": "310",
+                "currency": "USD",
+                "time": 1700003600,
+            },
+        ]
+    )
+    adapter = IbkrAdapter(client, retry=_no_jitter())
+    txs = await adapter.list_transactions()
+    assert txs[0].side == "buy"
+    assert txs[1].side == "sell"
+
+
+@pytest.mark.asyncio
 async def test_stream_quotes() -> None:
     client = FakeIbkrClient(
         quotes=[{"symbol": "AAPL", "last": "170", "currency": "USD", "t": 1700000000}]

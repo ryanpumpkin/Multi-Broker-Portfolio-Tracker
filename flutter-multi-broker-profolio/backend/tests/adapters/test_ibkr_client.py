@@ -319,14 +319,19 @@ async def test_fetch_account_summary_filters_tags_and_blank_currency() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_executions_maps_filters_sorts_and_limits() -> None:
-    contract = _Obj(localSymbol="AAPL", currency="USD")
+    from datetime import timedelta
+
+    # Use dates within the last 90 days so they aren't filtered by the
+    # default 90-day window (today is 2026-05-19 per currentDate context).
+    contract = _Obj(localSymbol="AAPL", currency="USD", secType="STK")
+    now = datetime.now(UTC)
     exec1 = _Obj(
         acctNumber="U1", execId="e1", side="BOT", shares=5, price=100,
-        time=datetime(2026, 1, 1, tzinfo=UTC),
+        time=now - timedelta(days=40),
     )
     exec2 = _Obj(
         acctNumber="U1", execId="e2", side="SLD", shares=3, price=110,
-        time=datetime(2026, 2, 1, tzinfo=UTC),
+        time=now - timedelta(days=20),
     )
     trade = _Obj(
         contract=contract,
@@ -339,9 +344,13 @@ async def test_fetch_executions_maps_filters_sorts_and_limits() -> None:
     ib = _FakeIb(trades_rows=[trade])
     client = IBKRClient(ib=ib)
 
-    rows = await client.fetch_executions(since="2026-01-15T00:00:00Z", limit=None)
+    # Filter by explicit since: only exec2 is within range.
+    since_str = (now - timedelta(days=30)).isoformat()
+    rows = await client.fetch_executions(since=since_str, limit=None)
     assert [r["execId"] for r in rows] == ["e2"]
 
+    # No since → 90-day default; both execs are within range.
+    # limit=1 takes the last (newest) one after sort-ascending.
     rows = await client.fetch_executions(since=None, limit=1)
     assert [r["execId"] for r in rows] == ["e2"]  # sort ascending, take last
 

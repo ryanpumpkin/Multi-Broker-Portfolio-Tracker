@@ -201,9 +201,11 @@ void main() {
         start: DateTime.utc(2025, 1, 1),
         end: DateTime.utc(2025, 12, 31),
       );
-      expect(seenUrl.queryParameters['sourceId'], 'lb');
-      expect(seenUrl.queryParameters['start'], '2025-01-01T00:00:00.000Z');
-      expect(seenUrl.queryParameters['end'], '2025-12-31T00:00:00.000Z');
+      // Backend accepts `source` and `since` (snake_case) per ARCHITECTURE_NOTES §9.
+      expect(seenUrl.queryParameters['source'], 'lb');
+      expect(seenUrl.queryParameters['since'], '2025-01-01T00:00:00.000Z');
+      // `end` is not forwarded — server-side filtering only supports lower-bound.
+      expect(seenUrl.queryParameters.containsKey('end'), isFalse);
     });
 
     test('CRUD endpoints use correct HTTP verbs', () async {

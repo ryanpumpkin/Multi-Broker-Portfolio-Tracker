@@ -27,7 +27,7 @@ void main() {
       expect(back, p);
     });
 
-    test('transactionFromJson parses ISO time and enum', () {
+    test('transactionFromJson parses ISO time and enum (camelCase)', () {
       final t = Mappers.transactionFromJson({
         'id': '1',
         'sourceId': 'a',
@@ -41,6 +41,56 @@ void main() {
       });
       expect(t.type, TransactionType.sell);
       expect(t.time.isUtc, true);
+    });
+
+    test('transactionFromJson parses backend snake_case wire shape', () {
+      // Backend sends: transaction_id, source, timestamp, side (buy/sell),
+      // symbol, quantity, price, currency, amount.
+      final t = Mappers.transactionFromJson({
+        'transaction_id': 'tx-99',
+        'source': 'longbridge',
+        'timestamp': '2026-05-01T10:15:20+00:00',
+        'side': 'buy',
+        'symbol': 'AAPL.US',
+        'quantity': '10',
+        'price': '150.00',
+        'currency': 'USD',
+        'amount': '1500.00',
+      });
+      expect(t.id, 'tx-99');
+      expect(t.sourceId, 'longbridge');
+      expect(t.type, TransactionType.buy);
+      expect(t.symbol, 'AAPL.US');
+      expect(t.quantity, 10.0);
+      expect(t.price, 150.0);
+      expect(t.currency, 'USD');
+      expect(t.time.isUtc, true);
+    });
+
+    test('transactionFromJson maps sell side from backend snake_case', () {
+      final t = Mappers.transactionFromJson({
+        'transaction_id': 'tx-100',
+        'source': 'ibkr',
+        'timestamp': '2026-05-02T14:30:00Z',
+        'side': 'sell',
+        'symbol': 'MSFT',
+        'quantity': '5',
+        'price': '300.00',
+        'currency': 'USD',
+      });
+      expect(t.type, TransactionType.sell);
+    });
+
+    test('transactionFromJson maps deposit side', () {
+      final t = Mappers.transactionFromJson({
+        'transaction_id': 'dep-1',
+        'source': 'binance',
+        'timestamp': '2026-05-01T00:00:00Z',
+        'side': 'deposit',
+        'currency': 'USDT',
+        'amount': '1000.00',
+      });
+      expect(t.type, TransactionType.deposit);
     });
 
     test('cashBalanceFromJson', () {

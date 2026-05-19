@@ -70,3 +70,27 @@ async def test_list_balances_returns_at_least_one_row() -> None:
     for bal in balances:
         assert bal.currency, f"Balance missing currency: {bal!r}"
         assert bal.amount is not None, f"Balance missing amount: {bal!r}"
+
+
+@pytest.mark.asyncio
+async def test_list_transactions_returns_at_least_one_row() -> None:
+    """With a running OpenD gateway, list_transactions returns >= 1 historical deal."""
+    from app.adapters.futu import FutuAdapter, request_trade_password
+    from app.adapters.futu.client import FutuOpenDClient
+
+    host = os.environ["FUTU_OPEND_HOST"]
+    port = int(os.getenv("FUTU_OPEND_PORT", "11111"))
+    trade_pw = os.getenv("FUTU_TRADE_PASSWORD")
+
+    client = FutuOpenDClient(host=host, port=port)
+    adapter = FutuAdapter(client)
+
+    with request_trade_password(trade_pw):
+        txs = await adapter.list_transactions(since=None, limit=None)
+
+    assert len(txs) >= 1, (
+        "Expected at least one historical deal from the Futu OpenD gateway"
+    )
+    for tx in txs:
+        assert tx.source == "futu", f"Transaction has wrong source: {tx!r}"
+        assert tx.timestamp is not None, f"Transaction missing timestamp: {tx!r}"

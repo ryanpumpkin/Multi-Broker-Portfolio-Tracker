@@ -195,27 +195,57 @@ class IBKRClient:
     async def fetch_executions(
         self, *, since: str | None, limit: int | None
     ) -> list[dict[str, Any]]:
+        """Fetch historical fill executions.
+
+        Uses ``reqExecutions`` (with an ``ExecutionFilter`` time) to retrieve
+        fills across all sessions, which is the historical API.  Falls back to
+        ``trades()`` (current-session only) when the filter class is unavailable.
+
+        Only equity (``STK``) fills are included (v1 scope).
+        """
+        from datetime import timedelta
+
         ib = await self._connect()
+
+        # Default window: last 90 days when since is None.
+        if since is not None:
+            since_dt: datetime = _parse_ts(since)
+        else:
+            since_dt = datetime.now(UTC) - timedelta(days=90)
+
+        fills_from_req: list[Any] | None = None
         try:
-            trades = await asyncio.to_thread(ib.trades)
-        except Exception as exc:  # noqa: BLE001
-            raise _classify_ibkr_error(exc) from exc
+            ib_insync_mod = importlib.import_module("ib_insync")
+            filter_cls = getattr(ib_insync_mod, "ExecutionFilter", None)
+            if filter_cls is not None:
+                exec_filter = filter_cls(
+                    time=since_dt.strftime("%Y%m%d %H:%M:%S"),
+                )
+                fills_raw = await asyncio.to_thread(ib.reqExecutions, exec_filter)
+                fills_from_req = list(fills_raw) if fills_raw is not None else []
+        except Exception:  # noqa: BLE001 - fall back to trades()
+            fills_from_req = None
 
         out: list[dict[str, Any]] = []
-        for trade in trades:
-            contract = getattr(trade, "contract", None)
-            fills = getattr(trade, "fills", None) or []
-            for fill in fills:
+        if fills_from_req is not None:
+            # reqExecutions returns a list of Fill namedtuples directly.
+            for fill in fills_from_req:
+                contract = getattr(fill, "contract", None)
                 execution = getattr(fill, "execution", None)
                 if execution is None:
                     continue
+                sec_type = getattr(contract, "secType", None)
+                if sec_type is not None and sec_type != "STK":
+                    continue
+                side_raw = getattr(execution, "side", None)
+                side = _map_ibkr_side(side_raw)
                 out.append(
                     {
                         "acctId": getattr(execution, "acctNumber", None),
                         "execId": getattr(execution, "execId", None),
                         "symbol": getattr(contract, "localSymbol", None)
                         or getattr(contract, "symbol", None),
-                        "side": getattr(execution, "side", None),
+                        "side": side,
                         "size": str(getattr(execution, "shares", "")),
                         "price": str(getattr(execution, "price", "")),
                         "currency": getattr(contract, "currency", None),
@@ -223,10 +253,42 @@ class IBKRClient:
                         "time": getattr(execution, "time", None),
                     }
                 )
+        else:
+            # Fallback: trades() — current TWS session only.
+            try:
+                trades = await asyncio.to_thread(ib.trades)
+            except Exception as exc:  # noqa: BLE001
+                raise _classify_ibkr_error(exc) from exc
 
-        if since is not None:
-            since_dt = _parse_ts(since)
-            out = [row for row in out if _parse_ts(row["time"]) >= since_dt]
+            for trade in trades:
+                contract = getattr(trade, "contract", None)
+                sec_type = getattr(contract, "secType", None)
+                if sec_type is not None and sec_type != "STK":
+                    continue
+                fills = getattr(trade, "fills", None) or []
+                for fill in fills:
+                    execution = getattr(fill, "execution", None)
+                    if execution is None:
+                        continue
+                    side_raw = getattr(execution, "side", None)
+                    side = _map_ibkr_side(side_raw)
+                    out.append(
+                        {
+                            "acctId": getattr(execution, "acctNumber", None),
+                            "execId": getattr(execution, "execId", None),
+                            "symbol": getattr(contract, "localSymbol", None)
+                            or getattr(contract, "symbol", None),
+                            "side": side,
+                            "size": str(getattr(execution, "shares", "")),
+                            "price": str(getattr(execution, "price", "")),
+                            "currency": getattr(contract, "currency", None),
+                            "net_amount": None,
+                            "time": getattr(execution, "time", None),
+                        }
+                    )
+
+        # Filter by since_dt (redundant for reqExecutions but needed for trades() fallback).
+        out = [row for row in out if row.get("time") is not None and _parse_ts(row["time"]) >= since_dt]
         out.sort(key=lambda row: _parse_ts(row["time"]))
         if limit is not None:
             out = out[-limit:]
@@ -262,6 +324,22 @@ class IBKRClient:
                 "currency": getattr(contract, "currency", "USD"),
                 "timestamp": datetime.now(UTC),
             }
+
+
+def _map_ibkr_side(raw: Any) -> str | None:
+    """Map IBKR execution side to 'buy' / 'sell'.
+
+    ib_insync returns ``'BOT'`` (bought) or ``'SLD'`` (sold) for equity fills.
+    Some SDK versions also return ``'BUY'`` / ``'SELL'`` (Client Portal API).
+    """
+    if raw is None:
+        return None
+    val = str(raw).upper()
+    if val in ("BOT", "BUY"):
+        return "buy"
+    if val in ("SLD", "SELL"):
+        return "sell"
+    return val.lower()
 
 
 def _dec(v: Any) -> Decimal:
@@ -311,7 +389,7 @@ def _map_balance(raw: dict[str, Any]) -> CashBalance:
 
 def _map_transaction(raw: dict[str, Any]) -> Transaction:
     side_raw = raw.get("side")
-    side = side_raw.lower() if isinstance(side_raw, str) else None
+    side = _map_ibkr_side(side_raw)
     return Transaction(
         source=SOURCE_NAME,
         account_id=raw.get("acctId") or raw.get("account_id"),

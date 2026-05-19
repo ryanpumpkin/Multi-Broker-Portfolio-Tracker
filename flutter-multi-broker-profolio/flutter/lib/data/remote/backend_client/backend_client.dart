@@ -237,13 +237,17 @@ class BackendClient {
     String? sourceId,
     DateTime? start,
     DateTime? end,
+    int? limit,
     Map<String, String>? wrappedCredsByConnection,
     List<int>? wrappedCredsKeyBytes,
   }) {
     final q = <String, dynamic>{};
-    if (sourceId != null) q['sourceId'] = sourceId;
-    if (start != null) q['start'] = start.toUtc().toIso8601String();
-    if (end != null) q['end'] = end.toUtc().toIso8601String();
+    if (sourceId != null) q['source'] = sourceId;
+    // Backend accepts `since` (ISO 8601 lower-bound) and optional `limit`.
+    // The `end` parameter is not supported server-side — client-side filtering
+    // handles it via the DateRange when reading from cache.
+    if (start != null) q['since'] = start.toUtc().toIso8601String();
+    if (limit != null) q['limit'] = limit;
     return _send(
       'GET',
       '/transactions',

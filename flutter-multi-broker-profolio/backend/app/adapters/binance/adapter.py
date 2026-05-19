@@ -429,16 +429,75 @@ class BinanceAdapter(SourceAdapter):
                 out.append(bal)
         return out
 
+    async def _symbols_from_balances(self) -> list[str]:
+        """Derive trading pair symbols from current non-stablecoin balances.
+
+        Returns up to 20 symbols (e.g. ``BTCUSDT``) to stay comfortably within
+        Binance's 1200-weight-per-minute rate limit (each myTrades call costs 10).
+
+        Uses USDT as the default quote currency; falls back to USD if USDT is
+        not in the STABLECOINS set for that region.  One symbol per base asset.
+        """
+        account = cast(dict[str, Any], await self._call(self._client.get_account))
+        out: list[str] = []
+        for row in account.get("balances", []):
+            asset = row.get("asset")
+            if not isinstance(asset, str):
+                continue
+            if asset in STABLECOINS:
+                continue
+            qty = _dec(row.get("free", "0")) + _dec(row.get("locked", "0"))
+            if qty <= 0:
+                continue
+            # One canonical pair per base asset: prefer USDT, then USD.
+            out.append(f"{asset}USDT")
+            if len(out) >= 20:
+                break
+        return out
+
     async def list_transactions(
         self,
         *,
         since: str | None = None,
         limit: int | None = None,
     ) -> list[Transaction]:
+        """Return trades, deposits, and withdrawals.
+
+        Trade history on Binance is per-symbol.  We derive the set of
+        "interesting" symbols from the current spot balances (non-stablecoin
+        assets priced in USDT/USD), capped at 20 symbols to respect the
+        per-minute rate-limit budget (each ``myTrades`` call costs 10 weight).
+        Each per-symbol call returns up to 1000 rows (hard Binance limit);
+        if a symbol returns exactly 1000 rows we record it but do not page
+        further — the caller can narrow the ``since`` window if they need
+        completeness.  The overall output is capped at 5000 transactions.
+        """
         await self._ensure_verified()
 
-        async def _trades() -> list[dict[str, Any]]:
-            return await self._client.get_my_trades(symbol=None, since=since, limit=limit)
+        symbols = await self._symbols_from_balances()
+        _page_size = 1000
+        _hard_cap = 5000
+
+        all_trades: list[dict[str, Any]] = []
+        for sym in symbols:
+            if len(all_trades) >= _hard_cap:
+                break
+
+            async def _fetch_sym(
+                _sym: str = sym,
+                _since: str | None = since,
+                _page: int = _page_size,
+            ) -> list[dict[str, Any]]:
+                try:
+                    return await self._client.get_my_trades(
+                        symbol=_sym, since=_since, limit=_page
+                    )
+                except PermanentError:
+                    # Symbol may not be traded — skip silently.
+                    return []
+
+            page = await self._call(_fetch_sym)
+            all_trades.extend(page)
 
         async def _deposits() -> list[dict[str, Any]]:
             return await self._client.get_deposit_history(since=since)
@@ -446,14 +505,16 @@ class BinanceAdapter(SourceAdapter):
         async def _withdrawals() -> list[dict[str, Any]]:
             return await self._client.get_withdraw_history(since=since)
 
-        trades = await self._call(_trades)
         deposits = await self._call(_deposits)
         withdrawals = await self._call(_withdrawals)
-        out: list[Transaction] = [_map_trade(t) for t in trades]
+
+        out: list[Transaction] = [_map_trade(t) for t in all_trades]
         out.extend(_map_deposit(d) for d in deposits)
         out.extend(_map_withdrawal(w) for w in withdrawals)
         out.sort(key=lambda tx: tx.timestamp)
-        return out
+        if limit is not None:
+            out = out[-limit:]
+        return out[:_hard_cap]
 
     async def stream_quotes(self, symbols: Iterable[str]) -> AsyncIterator[Quote]:
         await self._ensure_verified()

@@ -131,6 +131,99 @@ async def test_snapshot_surfaces_partial_failure_without_crashing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_transactions_fans_out_and_sorts() -> None:
+    """get_transactions fans out to all connections and returns sorted results."""
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    _now = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
+    _earlier = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+
+    class _TxAdapter(SourceAdapter):
+        source = "txsrc"
+
+        def __init__(self, txs: list[Transaction]) -> None:
+            self._txs = txs
+
+        async def list_positions(self) -> list[Position]:
+            return []
+
+        async def list_balances(self) -> list[CashBalance]:
+            return []
+
+        async def list_transactions(
+            self, *, since: str | None = None, limit: int | None = None
+        ) -> list[Transaction]:
+            return self._txs
+
+        def stream_quotes(self, symbols: Iterable[str]) -> AsyncIterator:  # pragma: no cover
+            async def _empty() -> AsyncIterator:
+                if False:
+                    yield
+            return _empty()
+
+        async def healthcheck(self) -> SourceHealth:
+            return SourceHealth(source="txsrc", status=SourceHealthStatus.OK)
+
+    tx_newer = Transaction(
+        source="txsrc",
+        account_id=None,
+        transaction_id="t2",
+        symbol="AAPL",
+        side="sell",
+        quantity=Decimal("10"),
+        price=Decimal("200"),
+        currency="USD",
+        amount=Decimal("2000"),
+        timestamp=_now,
+    )
+    tx_older = Transaction(
+        source="txsrc",
+        account_id=None,
+        transaction_id="t1",
+        symbol="AAPL",
+        side="buy",
+        quantity=Decimal("10"),
+        price=Decimal("150"),
+        currency="USD",
+        amount=Decimal("1500"),
+        timestamp=_earlier,
+    )
+
+    repository = InMemoryConnectionRepository(
+        [Connection(source="txsrc", connection_id="c-tx", display_name="tx")]
+    )
+    registry = StaticAdapterRegistry({"txsrc": _TxAdapter([tx_newer, tx_older])})
+    aggregator = PortfolioAggregator(connections=repository, adapters=registry, fx=_StaticFx())
+
+    result = await aggregator.get_transactions("user-tx")
+
+    assert len(result.items) == 2
+    # Sorted newest first.
+    assert result.items[0].transaction_id == "t2"
+    assert result.items[1].transaction_id == "t1"
+
+
+@pytest.mark.asyncio
+async def test_get_transactions_partial_failure_continues() -> None:
+    """A failing adapter in get_transactions surfaces in source_health."""
+    repository = InMemoryConnectionRepository(
+        [
+            Connection(source="good", connection_id="c-good", display_name="good"),
+            Connection(source="bad", connection_id="c-bad", display_name="bad"),
+        ]
+    )
+    registry = StaticAdapterRegistry({"good": _GoodAdapter(), "bad": _FailingAdapter()})
+    aggregator = PortfolioAggregator(connections=repository, adapters=registry, fx=_StaticFx())
+
+    result = await aggregator.get_transactions("user-1")
+
+    health = {item.source: item for item in result.source_health}
+    assert health["good"].status is SourceHealthStatus.OK
+    assert health["bad"].status is SourceHealthStatus.DOWN
+
+
+@pytest.mark.asyncio
 async def test_positions_publish_connection_status_events() -> None:
     repository = InMemoryConnectionRepository(
         [

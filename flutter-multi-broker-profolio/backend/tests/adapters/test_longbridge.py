@@ -224,3 +224,29 @@ async def test_integration_real_longbridge_balances_env_gated() -> None:
     adapter = LongBridgeAdapter(client, retry=RetryPolicy(max_attempts=2, initial_delay=0.1))
     balances = await adapter.list_balances()
     assert len(balances) >= 1
+
+
+@pytest.mark.asyncio
+async def test_integration_real_longbridge_transactions_env_gated() -> None:
+    """With real LongBridge credentials, list_transactions returns >= 1 historical execution."""
+    app_key = os.getenv("LB_APP_KEY")
+    app_secret = os.getenv("LB_APP_SECRET")
+    access_token = os.getenv("LB_ACCESS_TOKEN")
+    if not (app_key and app_secret and access_token):
+        pytest.skip("LongBridge integration env vars not set")
+
+    pytest.importorskip("longbridge.openapi")
+
+    client = LongbridgeClient(
+        app_key=app_key,
+        app_secret=app_secret,
+        access_token=access_token,
+    )
+    adapter = LongBridgeAdapter(client, retry=RetryPolicy(max_attempts=2, initial_delay=0.1))
+    txs = await adapter.list_transactions(since=None, limit=None)
+    assert len(txs) >= 1, (
+        "Expected at least one historical execution from LongBridge"
+    )
+    for tx in txs:
+        assert tx.source == "longbridge", f"Transaction has wrong source: {tx!r}"
+        assert tx.timestamp is not None, f"Transaction missing timestamp: {tx!r}"

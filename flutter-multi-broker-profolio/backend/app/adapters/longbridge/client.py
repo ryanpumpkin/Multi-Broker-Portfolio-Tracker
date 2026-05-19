@@ -349,6 +349,72 @@ def _classify_sdk_error(exc: Exception) -> Exception:
     return exc
 
 
+_PAGE_SIZE = 100
+_HARD_CAP = 5000
+
+
+async def _fetch_history_executions_paged(
+    trade_ctx: Any,
+    *,
+    start: datetime,
+    end: datetime,
+    limit: int | None,
+) -> list[Any]:
+    """Page through `history_executions` until all results are fetched.
+
+    LongBridge's history_executions returns up to _PAGE_SIZE rows per call.
+    We keep calling with an advancing `start` cursor (based on the last seen
+    trade_done_at) until:
+      - fewer than _PAGE_SIZE rows are returned (last page), OR
+      - _HARD_CAP total rows accumulated, OR
+      - `limit` rows accumulated (if caller specified one).
+    """
+    accumulated: list[Any] = []
+    cursor_start = start
+    effective_cap = min(_HARD_CAP, limit) if limit is not None else _HARD_CAP
+
+    while len(accumulated) < effective_cap:
+        try:
+            rows = await _to_thread(
+                trade_ctx.history_executions,
+                symbol=None,
+                start_at=cursor_start,
+                end_at=end,
+            )
+        except Exception as exc:  # noqa: BLE001 - try today_executions fallback
+            if "history_executions" in str(type(trade_ctx)):
+                raise
+            # Fallback: SDK version without history_executions — use today_executions
+            try:
+                rows = await _to_thread(trade_ctx.today_executions)
+            except Exception:  # noqa: BLE001
+                raise exc from exc
+
+        if isinstance(rows, list):
+            page = rows
+        else:
+            page = list(_to_iterable(rows, attribute="orders", attribute_fallback="executions"))
+
+        accumulated.extend(page)
+
+        # Stop when we got a partial page (last page) or nothing at all
+        if len(page) < _PAGE_SIZE:
+            break
+
+        # Advance cursor to the timestamp of the last row + 1 ms
+        last_ts = _row_timestamp(page[-1]) if page else None
+        if last_ts is None:
+            break
+        from datetime import timedelta
+        cursor_start = last_ts + timedelta(milliseconds=1)
+        if cursor_start >= end:
+            break
+
+    if limit is not None:
+        accumulated = accumulated[:limit]
+    return accumulated
+
+
 def _parse_since(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
