@@ -70,10 +70,21 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
             str(getattr(p, "symbol", "")) for p in rows if getattr(p, "symbol", None)
         ]
         if symbols:
+            import logging
+            log = logging.getLogger("mbp.longbridge.client")
             try:
                 quotes = await _to_thread(self._quote_ctx.quote, symbols)
+                # Try both the documented attribute name and the bare list
+                # shape; older SDK versions returned the list directly.
+                quote_iter = _to_iterable(quotes, attribute="secu_quote")
+                log.info(
+                    "quote-enrich: symbols=%s quote_count=%d quotes_type=%s",
+                    symbols,
+                    len(quote_iter),
+                    type(quotes).__name__,
+                )
                 price_by_symbol: dict[str, Any] = {}
-                for q in _to_iterable(quotes, attribute="secu_quote"):
+                for q in quote_iter:
                     sym = getattr(q, "symbol", None) or (
                         q.get("symbol") if isinstance(q, dict) else None
                     )
@@ -82,6 +93,7 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
                     )
                     if sym and price is not None:
                         price_by_symbol[str(sym)] = price
+                log.info("quote-enrich: prices_resolved=%s", price_by_symbol)
 
                 # Patch each position with the live price under both
                 # `last_price` and `last_done` so downstream code that
@@ -97,10 +109,8 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
                             setattr(p, attr, price)
                         except (AttributeError, TypeError):
                             pass
-            except Exception:  # noqa: BLE001 - quote enrichment is best-effort
-                # If quotes fail, we still return positions with null
-                # last_price; the aggregator handles that gracefully.
-                pass
+            except Exception as exc:  # noqa: BLE001 - quote enrichment is best-effort
+                log.warning("quote-enrich failed: %s", exc, exc_info=True)
 
         return rows
 
