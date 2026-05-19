@@ -97,30 +97,30 @@ just an API key. Confirms the multi-broker shape works.
 
 **Subtasks:**
 
-- [~] User creates a read-only API key at binance.com or
+- [!] User creates a read-only API key at binance.com or (blocked: real user key required)
   binance.us:
   - Tick **only** "Enable Reading" — leave Trade, Withdraw,
     Margin, Futures **off**. Binance enforces this server-side.
   - Restrict by IP if possible (paranoid mode).
-- [~] In the Flutter Add Connection dialog, pick `binance`,
+- [x] In the Flutter Add Connection dialog, pick `binance`,
   enter `apiKey`, `apiSecret`, and `region` (`com` or `us`).
-- [~] Refresh the dashboard. Backend should:
+- [!] Refresh the dashboard. Backend should: (blocked: real broker creds required)
   1. Build the wrapped credentials.
   2. Instantiate `BinanceAdapter` via the factory.
   3. Call `client.account()` and pull spot balances.
   4. Call `client.myTrades()` for recent trades (skip per-symbol,
      `myTrades` only returns trades for a given symbol — see
      Open Items below).
-- [~] **Likely fix needed:** the existing `HttpxBinanceClient`
+- [!] **Likely fix needed:** the existing `HttpxBinanceClient` (blocked: requires real-key verification)
   uses HMAC-SHA256 signing per the Binance docs. Verify against
   `https://api.binance.com/api/v3/account` with a real key. If
   the signed query string format is wrong, fix per
   https://binance-docs.github.io/apidocs/spot/en/#endpoint-security-type
-- [~] Map response to `Position` + `CashBalance`. Binance returns
+- [x] Map response to `Position` + `CashBalance`. Binance returns
   asset balances, not equities — represent crypto holdings as
   positions with `currency` = the quote-asset symbol (e.g.
   `USDT`) and `symbol` = the base asset (e.g. `BTC`).
-- [~] Spot-only. Skip futures + margin + options.
+- [x] Spot-only. Skip futures + margin + options.
 
 **Gates:**
 
@@ -138,35 +138,35 @@ gateway needs interactive login on first run.
 
 **Subtasks:**
 
-- [~] Decide between Client Portal Web API gateway
+- [!] Decide between Client Portal Web API gateway (blocked: deployment/operator choice)
   (recommended for headless server) vs IB Gateway / TWS
   (graphical, interactive login).
-- [~] Start the sidecar via `docker compose up ibkr-gateway`.
+- [!] Start the sidecar via `docker compose up ibkr-gateway`. (blocked: private image / operator setup)
   Verify the gateway is reachable from the backend container at
   `ibkr-gateway:5000`. The current compose file references
   `ghcr.io/unusualwhale/ibkr-cpapi:latest` — confirm that image
   exists or substitute one.
-- [~] **Authenticate once.** Most CP-Gateway images require a
+- [!] **Authenticate once.** Most CP-Gateway images require a (blocked: interactive 2FA in operator session)
   one-time interactive auth at `https://<host>:5000/`. After
   successful auth the session lives in the gateway's state
   volume (`ibkr-state`) until the periodic re-auth expires
   (typically 24h).
-- [~] Wire the keep-alive tickle: `IbkrAdapter.start_keepalive`
+- [x] Wire the keep-alive tickle: `IbkrAdapter.start_keepalive`
   exists but isn't called anywhere. Either:
   - Start it on backend boot (one task per active IBKR
     connection), or
   - Call `client.tickle()` opportunistically on each
     request.
-- [~] In the Flutter Add Connection dialog, pick `ibkr`, enter
+- [!] In the Flutter Add Connection dialog, pick `ibkr`, enter (blocked: real account required)
   the optional `accountId` (e.g. `U12345`). The gateway handles
   the actual login.
-- [~] Refresh the dashboard. Backend should:
+- [!] Refresh the dashboard. Backend should: (blocked: live gateway + account required)
   1. Build the wrapped credentials (mostly metadata since
      the real login is at the gateway).
   2. Instantiate `IbkrAdapter` via the factory.
   3. Call `client.fetch_positions()`, `client.fetch_account_summary()`.
   4. Map to domain.
-- [~] Add an integration test gated on env vars `IBKR_GATEWAY_HOST`
+- [x] Add an integration test gated on env vars `IBKR_GATEWAY_HOST`
   / `IBKR_GATEWAY_PORT` that, when set, hits a real running
   gateway and asserts at least one position row.
 
@@ -186,24 +186,24 @@ session that the user must supply.
 
 **Subtasks:**
 
-- [~] Start the sidecar via `docker compose up futu-opend`.
+- [!] Start the sidecar via `docker compose up futu-opend`. (blocked: sidecar image/account setup required)
   Verify reachable at `futu-opend:11111`. Current compose file
   references `ghcr.io/futu-sg/futunng-opend:latest` — confirm or
   substitute.
-- [~] OpenD handles the account login at startup using env vars
+- [!] OpenD handles the account login at startup using env vars (blocked: real login secrets required)
   (`FUTU_OPEND_LOGIN_ACCOUNT`, `FUTU_OPEND_LOGIN_PASSWORD_MD5`).
   Once logged in, OpenD exposes a localhost API.
-- [~] In the Flutter Add Connection dialog, pick `futu`. Add a
+- [x] In the Flutter Add Connection dialog, pick `futu`. Add a
   **trade unlock password** field — this is captured per request
   and never persisted. The credentials dict goes through the
   same E2E wrap as everything else; the backend's
   `FutuAdapter._unlocked` context manager unlocks the trade
   context, runs the query, then re-locks.
-- [~] Currently the existing `FutuAdapter` already has the
+- [x] Currently the existing `FutuAdapter` already has the
   unlock pattern wired (`get_request_trade_password`). Verify
   the `unlock_password_provider` callback resolves correctly
   from the per-request credential context.
-- [~] Refresh the dashboard. Backend should:
+- [!] Refresh the dashboard. Backend should: (blocked: live OpenD + account required)
   1. Build wrapped credentials including the trade password.
   2. Instantiate `FutuAdapter`.
   3. Call `client.fetch_positions()`, `client.fetch_accounts()`.
@@ -284,7 +284,7 @@ connects.
 
 **Subtasks:**
 
-- [ ] **Backend `/v1/quotes/stream` WebSocket endpoint.** Accepts
+- [x] **Backend `/v1/quotes/stream` WebSocket endpoint.** Accepts
   a Firebase ID token + wrapped credentials in the upgrade
   request. On connect:
   - Authenticate the token.
@@ -293,22 +293,22 @@ connects.
     `{source, symbol, price, currency, timestamp}` messages.
   - On `add_symbol` / `remove_symbol` client messages, mutate
     the active subscription set.
-- [ ] **LongBridge `stream_quotes`** uses
+- [x] **LongBridge `stream_quotes`** uses
   `QuoteContext.subscribe(symbols, SubType.Quote)` and yields
   pushed quotes via the SDK's callback. Currently we poll
   `quote()` every second; switch to push-based subscription.
-- [ ] **Binance `stream_quotes`** uses Binance's `wss://stream`
+- [x] **Binance `stream_quotes`** uses Binance's `wss://stream`
   endpoint with the `<symbol>@trade` topic.
-- [ ] **IBKR `stream_quotes`** uses `reqMktData` via ib_insync
+- [x] **IBKR `stream_quotes`** uses `reqMktData` via ib_insync
   (already drafted). The keep-alive must continue to fire for
   the gateway session.
-- [ ] **Futu `stream_quotes`** uses OpenD's
+- [x] **Futu `stream_quotes`** uses OpenD's
   `quote_ctx.subscribe(symbols, [SubType.QUOTE])` and the
   push handler.
-- [ ] **Flutter `QuotesRepositoryImpl`** already exists. Verify
+- [x] **Flutter `QuotesRepositoryImpl`** already exists. Verify
   it reconnects with exp backoff after a server drop (the
   existing `QuotesStream` has this — sanity check it).
-- [ ] **Live quote UI binding.** In the Positions screen, swap
+- [x] **Live quote UI binding.** In the Positions screen, swap
   `position.currentPrice` for a `ref.watch(quotesProvider(symbol))`
   so the row updates as quotes arrive.
 
@@ -343,14 +343,14 @@ connects.
 - [x] Add a section listing every commit on `main` since the
   original orchestrator finished, grouped by theme (auth,
   encryption, broker wiring, FX, etc.).
-- [~] Capture a screenshot of the working dashboard with real
+- [!] Capture a screenshot of the working dashboard with real (blocked: live account data + interactive UI capture required)
   data into `doc/screenshots/` and reference it from the README.
 - [x] Update the README at the repo root with:
   - The one-paragraph "what this is".
   - A pointer to `doc/RUNBOOK.md` for setup.
   - A pointer to `doc/ARCHITECTURE_NOTES.md` for the decisions
     that aren't in the original spec.
-- [~] Optional: tag the commit, e.g.
+- [x] Optional: tag the commit, e.g.
   `git tag -a v0.1-personal-mvp -m "Real LongBridge data
   flowing end-to-end"`.
 
