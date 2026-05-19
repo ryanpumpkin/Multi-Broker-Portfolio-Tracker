@@ -15,7 +15,7 @@ import hashlib
 import hmac
 import importlib
 import urllib.parse
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -701,7 +701,39 @@ class HttpxBinanceClient:  # pragma: no cover - real network wrapper
         return out
 
     def stream_mini_tickers(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]:
-        raise NotImplementedError("WS streaming is wired up by the aggregator module")
+        # pragma: no cover - requires live Binance WebSocket; tested via env-gated integration test
+        return self._stream_mini_tickers_impl(symbols)
+
+    async def _stream_mini_tickers_impl(  # pragma: no cover - live network path
+        self, symbols: list[str]
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """WebSocket mini-ticker stream for multiple symbols via Binance combined stream."""
+        if not symbols:
+            return
+        # Build the combined stream path: <lower_symbol>@miniTicker for each symbol.
+        # Binance combined stream URL: wss://stream.binance.com:9443/stream?streams=btcusdt@miniTicker/...
+        stream_path = "/".join(f"{s.lower()}@miniTicker" for s in symbols)
+        ws_url = f"{self.host.ws_base}/stream?streams={stream_path}"
+        try:
+            ws_mod = importlib.import_module("websockets")
+        except ModuleNotFoundError as exc:
+            raise PermanentError("websockets is not installed") from exc
+        connect_fn = getattr(ws_mod, "connect", None)
+        if connect_fn is None:
+            raise PermanentError("websockets.connect is unavailable")
+        import json as _json  # local import to avoid global side-effects
+        async with connect_fn(ws_url) as ws:
+            async for raw_text in ws:
+                if isinstance(raw_text, bytes):
+                    raw_text = raw_text.decode()
+                try:
+                    outer = _json.loads(raw_text)
+                except Exception:  # noqa: BLE001
+                    continue
+                # Combined stream wraps each payload under {"stream": ..., "data": {...}}
+                data = outer.get("data", outer) if isinstance(outer, dict) else outer
+                if isinstance(data, dict):
+                    yield data
 
     async def ping(self) -> bool:
         try:

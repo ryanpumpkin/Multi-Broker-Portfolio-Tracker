@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../domain/domain.dart';
 import '../../../router/app_router.dart';
+import '../../../state/quotes_provider.dart';
 import '../../../state/state.dart';
 import '../../widgets/widgets.dart';
 import '../shared/presentation_scaffold.dart';
@@ -51,7 +52,7 @@ class _PositionsScreenState extends ConsumerState<PositionsScreen> {
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final position = positions[index];
-                        return PositionRow(
+                        return _LivePositionRow(
                           key: Key('position_${position.symbol}'),
                           position: position,
                           baseCurrency: snapshot.baseCurrency,
@@ -178,28 +179,77 @@ class _PositionsScreenState extends ConsumerState<PositionsScreen> {
   }
 
   Widget _detailPanel(Position position) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(position.symbol, style: const TextStyle(fontSize: 20)),
-          const SizedBox(height: 4),
-          Text(position.name),
-          const SizedBox(height: 12),
-          Text('Quantity: ${position.quantity}'),
-          Text('Avg cost: ${position.avgCost} ${position.currency}'),
-          Text('Current price: ${position.currentPrice} ${position.currency}'),
-          const SizedBox(height: 10),
-          PnlBadge(
-            amount: position.unrealizedPnl,
-            currency: position.currency,
-            percent: position.marketValue == 0
-                ? 0
-                : 100 * (position.unrealizedPnl / position.marketValue),
+    return Consumer(
+      builder: (context, ref, _) {
+        final liveQuoteAsync = ref.watch(quotesProvider(position.symbol));
+        final livePrice =
+            liveQuoteAsync.valueOrNull?.price ?? position.currentPrice;
+        final liveMarketValue = position.quantity * livePrice;
+        final livePnl = (livePrice - position.avgCost) * position.quantity;
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(position.symbol, style: const TextStyle(fontSize: 20)),
+              const SizedBox(height: 4),
+              Text(position.name),
+              const SizedBox(height: 12),
+              Text('Quantity: ${position.quantity}'),
+              Text('Avg cost: ${position.avgCost} ${position.currency}'),
+              Text('Current price: $livePrice ${position.currency}'),
+              const SizedBox(height: 10),
+              PnlBadge(
+                amount: livePnl,
+                currency: position.currency,
+                percent: liveMarketValue == 0
+                    ? 0
+                    : 100 * (livePnl / liveMarketValue),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
+    );
+  }
+}
+
+/// A [PositionRow] that overlays a live quote price from [quotesProvider]
+/// when available, falling back to [position.currentPrice] until the stream
+/// delivers its first tick.
+class _LivePositionRow extends ConsumerWidget {
+  const _LivePositionRow({
+    required this.position,
+    this.baseCurrency,
+    this.onTap,
+    super.key,
+  });
+
+  final Position position;
+  final String? baseCurrency;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final liveQuoteAsync = ref.watch(quotesProvider(position.symbol));
+    final livePrice =
+        liveQuoteAsync.valueOrNull?.price ?? position.currentPrice;
+
+    // Recompute market value and P&L from the live price so the row reflects
+    // the streaming tick rather than the last snapshot value.
+    final liveMarketValue = position.quantity * livePrice;
+    final livePnl = (livePrice - position.avgCost) * position.quantity;
+
+    final livePosition = position.copyWith(
+      currentPrice: livePrice,
+      marketValue: liveMarketValue,
+      unrealizedPnl: livePnl,
+    );
+
+    return PositionRow(
+      position: livePosition,
+      baseCurrency: baseCurrency,
+      onTap: onTap,
     );
   }
 }
