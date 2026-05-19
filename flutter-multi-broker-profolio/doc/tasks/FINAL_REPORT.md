@@ -90,3 +90,70 @@ b5f40a4  feat(flutter-bootstrap)
 7b9bf03  feat(backend-bootstrap)
 a3a0f8b  feat(firebase-setup)
 ```
+
+---
+
+## Update — Post-Orchestrator Iteration
+
+**Updated:** 2026-05-19
+
+After the initial 14 modules landed, a second iteration drove the
+end-to-end LongBridge integration through real broker credentials,
+encryption, and a working dashboard. **45 additional commits**
+landed across these themes:
+
+### Broker integration (Wave 1 – 4 of `broker-integration-prompt.md`)
+
+| Slice | Commit | What |
+|---|---|---|
+| Shared backend plumbing | b607fff | X-MBP-Creds header parsing, Python unwrap_from_backend, adapter_factory, connection_status events |
+| LongBridge | 19da9ee | SDK-backed `LongbridgeClient`, mappers, retry/error coverage |
+| Binance | 7f06792 | python-binance client, kline mapping |
+| IBKR | 92d5486 | ib_insync gateway client, retry/error coverage |
+| Futu | 02c0997 | OpenD client with request-scoped unlock |
+| Flutter wrapped creds | bada756 | wrapped credentials through portfolio + tx flows |
+| UI polish | 38764b1 | sync recency, error details |
+| Backend vault sync | 84e4205 | Firestore-backed `ConnectionVaultStore` |
+| Adapter builders | 07d5fbc | Register LongBridge/IBKR/Futu builders in `AdapterFactory` |
+| Coverage fix-ups | 4edfc18 | Bring all broker slices ≥80% coverage |
+
+### Operational fixes (end-to-end debugging)
+
+| Layer | Commits | Fix |
+|---|---|---|
+| Docker / KMS | f2150d1, 49f3428 | File-backed KMS path + bind-mount of `backend/.secrets/` |
+| Auth | f8eeb63, 5992a28, 10133f2 | Real Firebase ID-token verification; remove anonymous fallback; nudge UX to sign up |
+| Auth lifecycle | 1f0b3ed | Refresh app-lock state on sign-out |
+| Router | (in 5992a28) | Auth-guard redirect to `/auth/sign-in` |
+| Mappers | c4b3082, 797d2e8, 01cb5a0 | Accept snake_case + numeric strings + null fields from backend |
+| BackendClient | 725a314 | Match `/portfolio?base_currency=USD` |
+| Vault read | 2bdba03 | Handle `QueryResultsList` from `CollectionReference.get()` |
+| Credential dialog | 91e25c7, ddc9dbd, 6369753 | Real PIN input, ConsumerStatefulWidget refactor, auto-prompt on refresh |
+| Encryption | 9d14537 | Stop double-encoding the encrypted blob |
+| Dashboard | 9f5ac19, 584d5b2 | AppBar refresh button + save snackbar |
+| FX | 0a430d4, b73a62e | Soft-fail unsupported pairs; default to Frankfurter |
+| LongBridge data shape | 47a53ec, e814d20 | Unwrap `StockPositionsResponse.channels`; clone position to dict to inject quote prices |
+| LongBridge enrichment | d1cfd1a, d57650d, d539e79 | Fetch live quotes via `QuoteContext.quote()`; cost-basis market_value fallback |
+
+### Documentation added in this iteration
+
+- `doc/RUNBOOK.md` — proven local-setup recipe
+- `doc/ARCHITECTURE_NOTES.md` — decisions made during implementation that aren't in the original spec
+- `doc/POST_MVP_PLAN.md` — next-iteration backlog with detailed sub-tasks for items 1-5
+
+### Verified working state (as of last commit)
+
+- LongBridge connection live; real positions (PLTR, ORCL, Grayscale BTC ETF) rendered with last-close prices.
+- HKD/USD conversion via Frankfurter (ECB rates, free).
+- Total portfolio value matches LongBridge app within 0.4% (FX rate variance).
+- E2E credential encryption verified — backend reads encrypted blob, never sees plaintext outside the 2-min request window.
+- Email/password auth persists across `flutter run` restarts.
+- PIN-derived AES key correctly populated via inline Unlock dialog when wiped by auto-lock.
+
+### Known gaps (covered by `POST_MVP_PLAN.md`)
+
+1. **Diagnostic INFO logging is verbose.** Listed in plan item 1.
+2. **Binance / IBKR / Futu not yet driven end-to-end** with real credentials. Plan item 2.
+3. **Transactions screen empty** — only `today_executions` wired. Plan item 3.
+4. **Live quote streaming not wired** — scaffolding exists but no WebSocket connect. Plan item 4.
+5. **`drift_db_worker.dart.js: 404`** in browser console — harmless, in-page sqlite3.wasm fallback works. Mentioned in RUNBOOK §"Common gotchas".
