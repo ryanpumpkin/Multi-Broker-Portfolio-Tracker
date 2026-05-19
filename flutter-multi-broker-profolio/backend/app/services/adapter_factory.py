@@ -78,7 +78,10 @@ def _parse_credential_json(raw: str) -> dict[str, Any]:
 def _build_binance_adapter(credentials: dict[str, Any]) -> SourceAdapter:
     api_key = _pick_str(credentials, "apiKey", "api_key")
     api_secret = _pick_str(credentials, "apiSecret", "api_secret")
-    host_raw = (_pick_optional_str(credentials, "host") or "binance.com").strip().lower()
+    # Accept both "host" (legacy/test) and "region" (Flutter dialog sends 'com' or 'us').
+    host_raw = (
+        _pick_optional_str(credentials, "host", "region") or "binance.com"
+    ).strip().lower()
     if host_raw in {"binance.us", "us"}:
         host = BinanceHost.US
     else:

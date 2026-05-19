@@ -345,15 +345,61 @@ class BinanceAdapter(SourceAdapter):
                 return _dec(row["close"]), quote_currency
         return None, None
 
+    async def _ticker_price(
+        self,
+        *,
+        asset: str,
+        price_cache: dict[str, Decimal | None],
+    ) -> tuple[Decimal | None, str | None]:
+        """Return (price, quote_currency) for *asset* priced in USDT.
+
+        Results are stored in *price_cache* (keyed by the trading pair symbol)
+        so repeated lookups within a single request are free.  Falls back to a
+        klines call when the ticker endpoint rejects the pair (e.g. the asset
+        has no USDT pair).
+        """
+        for quote_currency in ("USDT", "USD"):
+            pair = f"{asset}{quote_currency}"
+            if pair in price_cache:
+                cached = price_cache[pair]
+                return (cached, quote_currency) if cached is not None else (None, None)
+            try:
+                ticker = await self._client.get_symbol_ticker(symbol=pair)
+                price = _dec(ticker["price"])
+                price_cache[pair] = price
+                return price, quote_currency
+            except (PermanentError, KeyError):
+                price_cache[pair] = None
+                continue
+        # Fall back to klines if ticker failed for all quote currencies.
+        fallback_price, fallback_currency = await self._price_from_klines(asset=asset)
+        return fallback_price, fallback_currency
+
     async def list_positions(self) -> list[Position]:
+        """Return non-stablecoin spot balances as Position objects.
+
+        Only assets with a non-zero ``free`` balance that are not in
+        STABLECOINS are included.  Current price is fetched via
+        ``get_symbol_ticker`` (ASSET+USDT pair) with a per-request cache so
+        repeated ticker calls for the same pair are avoided.
+        """
         account = await self._get_verified_account()
+        price_cache: dict[str, Decimal | None] = {}
         out: list[Position] = []
         for row in account.get("balances", []):
-            price: Decimal | None = None
-            price_currency: str | None = None
             asset = row.get("asset")
-            if isinstance(asset, str) and asset not in {"USDT", "USDC", "BUSD", "USD"}:
-                price, price_currency = await self._price_from_klines(asset=asset)
+            if not isinstance(asset, str):
+                continue
+            # Stablecoins belong in list_balances, not list_positions.
+            if asset in STABLECOINS:
+                continue
+            # Only include assets with a non-zero free balance.
+            free = _dec(row.get("free", "0"))
+            if free <= 0:
+                continue
+            price, price_currency = await self._ticker_price(
+                asset=asset, price_cache=price_cache
+            )
             pos = _spot_balance_to_position(
                 row,
                 last_price=price,
@@ -364,9 +410,20 @@ class BinanceAdapter(SourceAdapter):
         return out
 
     async def list_balances(self) -> list[CashBalance]:
+        """Return stablecoin / fiat spot balances as CashBalance objects.
+
+        Only assets that appear in STABLECOINS and have a non-zero total
+        balance (free + locked) are included.
+        """
         account = await self._get_verified_account()
         out: list[CashBalance] = []
         for row in account.get("balances", []):
+            asset = row.get("asset")
+            if not isinstance(asset, str):
+                continue
+            # Only stablecoins / fiat on-chain belong here.
+            if asset not in STABLECOINS:
+                continue
             bal = _spot_balance_to_cash(row)
             if bal is not None:
                 out.append(bal)
@@ -563,18 +620,23 @@ class HttpxBinanceClient:  # pragma: no cover - real network wrapper
             return response
         raise PermanentError("Unexpected Binance klines response shape")
 
-    async def get_ticker_prices(self, symbols: list[str]) -> list[dict[str, Any]]:
+    async def get_symbol_ticker(self, *, symbol: str) -> dict[str, Any]:
         sdk = await self._sdk_client()
+        try:
+            row = await sdk.get_symbol_ticker(symbol=symbol)
+        except Exception as exc:
+            raise self._translate_exception(exc) from exc
+        if not isinstance(row, dict):
+            raise PermanentError("Unexpected Binance symbol ticker response shape")
+        return row
+
+    async def get_ticker_prices(self, symbols: list[str]) -> list[dict[str, Any]]:
         if not symbols:
             return []
         out: list[dict[str, Any]] = []
         for symbol in symbols:
-            try:
-                row = await sdk.get_symbol_ticker(symbol=symbol)
-            except Exception as exc:
-                raise self._translate_exception(exc) from exc
-            if isinstance(row, dict):
-                out.append(row)
+            row = await self.get_symbol_ticker(symbol=symbol)
+            out.append(row)
         return out
 
     def stream_mini_tickers(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]:

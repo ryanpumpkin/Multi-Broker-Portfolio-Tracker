@@ -45,6 +45,27 @@ def test_factory_builds_binance_us_when_host_specified() -> None:
     assert adapter.host is BinanceHost.US
 
 
+def test_factory_builds_binance_us_when_region_key_specified() -> None:
+    """Flutter dialog sends 'region' key with values 'com' or 'us'."""
+    factory = AdapterFactory()
+    adapter = factory.for_connection(
+        connection_kind="binance",
+        plaintext_creds=json.dumps({"apiKey": "k", "apiSecret": "s", "region": "us"}),
+    )
+    assert isinstance(adapter, BinanceAdapter)
+    assert adapter.host is BinanceHost.US
+
+
+def test_factory_builds_binance_com_when_region_com() -> None:
+    factory = AdapterFactory()
+    adapter = factory.for_connection(
+        connection_kind="binance",
+        plaintext_creds=json.dumps({"apiKey": "k", "apiSecret": "s", "region": "com"}),
+    )
+    assert isinstance(adapter, BinanceAdapter)
+    assert adapter.host is BinanceHost.COM
+
+
 def test_factory_rejects_invalid_credential_json() -> None:
     factory = AdapterFactory()
     with pytest.raises(AdapterCredentialError):

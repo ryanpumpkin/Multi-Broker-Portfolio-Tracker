@@ -28,6 +28,7 @@ class FakeBinanceClient:
         withdrawals: list[dict[str, Any]] | None = None,
         quotes: list[dict[str, Any]] | None = None,
         klines: dict[str, list[Any]] | None = None,
+        tickers: dict[str, str] | None = None,
         fail_account: int = 0,
         ping_result: bool = True,
         ping_raises: Exception | None = None,
@@ -44,6 +45,8 @@ class FakeBinanceClient:
         self._withdrawals = withdrawals or []
         self._quotes = quotes or []
         self._klines = klines or {}
+        # ticker prices keyed by symbol (e.g. {"BTCUSDT": "65000"})
+        self._tickers: dict[str, str] = tickers or {}
         self._fail_account = fail_account
         self._ping_result = ping_result
         self._ping_raises = ping_raises
@@ -73,6 +76,13 @@ class FakeBinanceClient:
         self, *, symbol: str, interval: str, limit: int
     ) -> list[Any]:
         return self._klines.get(symbol, [])
+
+    async def get_symbol_ticker(self, *, symbol: str) -> dict[str, Any]:
+        from app.adapters._common import PermanentError
+
+        if symbol not in self._tickers:
+            raise PermanentError(f"symbol {symbol} not found")
+        return {"symbol": symbol, "price": self._tickers[symbol]}
 
     async def get_ticker_prices(self, symbols: list[str]) -> list[dict[str, Any]]:
         return []
@@ -158,14 +168,16 @@ async def test_rejects_withdraw_enabled_key() -> None:
 
 @pytest.mark.asyncio
 async def test_list_positions_skips_zero_and_maps() -> None:
+    # BTC is non-stablecoin → position; USDT is stablecoin → balance; ETH is zero → skip.
     client = FakeBinanceClient(
         account=_read_only_account(),
-        klines={"BTCUSDT": [[0, "0", "0", "0", "65000", "0"]]},
+        tickers={"BTCUSDT": "65000"},
     )
     adapter = BinanceAdapter(client, retry=_no_jitter())
     positions = await adapter.list_positions()
     symbols = {p.symbol for p in positions}
-    assert symbols == {"BTC", "USDT"}
+    # USDT is a stablecoin: must not appear in positions.
+    assert symbols == {"BTC"}
     btc = next(p for p in positions if p.symbol == "BTC")
     assert btc.quantity == Decimal("0.5")
     assert btc.last_price == Decimal("65000")
@@ -174,11 +186,27 @@ async def test_list_positions_skips_zero_and_maps() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_balances_skips_zero() -> None:
+async def test_list_positions_falls_back_to_klines_when_ticker_fails() -> None:
+    """When get_symbol_ticker raises PermanentError, fall back to klines."""
+    client = FakeBinanceClient(
+        account=_read_only_account(),
+        # No tickers supplied → get_symbol_ticker raises PermanentError.
+        klines={"BTCUSDT": [[0, "0", "0", "0", "60000", "0"]]},
+    )
+    adapter = BinanceAdapter(client, retry=_no_jitter())
+    positions = await adapter.list_positions()
+    btc = next(p for p in positions if p.symbol == "BTC")
+    assert btc.last_price == Decimal("60000")
+
+
+@pytest.mark.asyncio
+async def test_list_balances_skips_zero_and_non_stablecoins() -> None:
+    # USDT is stablecoin → included; BTC is non-stablecoin → excluded; ETH is zero → skip.
     client = FakeBinanceClient(account=_read_only_account())
     adapter = BinanceAdapter(client, retry=_no_jitter())
     balances = await adapter.list_balances()
-    assert {b.currency for b in balances} == {"BTC", "USDT"}
+    # BTC must NOT appear in balances (it's a non-stablecoin position).
+    assert {b.currency for b in balances} == {"USDT"}
 
 
 @pytest.mark.asyncio
@@ -256,7 +284,11 @@ async def test_healthcheck_paths() -> None:
 
 @pytest.mark.asyncio
 async def test_supports_binance_us_host() -> None:
-    client = FakeBinanceClient(host=BinanceHost.US, account=_read_only_account())
+    client = FakeBinanceClient(
+        host=BinanceHost.US,
+        account=_read_only_account(),
+        tickers={"BTCUSDT": "65000"},
+    )
     adapter = BinanceAdapter(client, retry=_no_jitter())
     assert adapter.host is BinanceHost.US
     positions = await adapter.list_positions()
@@ -265,7 +297,11 @@ async def test_supports_binance_us_host() -> None:
 
 @pytest.mark.asyncio
 async def test_retries_rate_limited_account_then_succeeds() -> None:
-    client = FakeBinanceClient(account=_read_only_account(), fail_account=1)
+    client = FakeBinanceClient(
+        account=_read_only_account(),
+        fail_account=1,
+        tickers={"BTCUSDT": "65000"},
+    )
     adapter = BinanceAdapter(client, retry=RetryPolicy(max_attempts=3, initial_delay=0.0, jitter=0.0))
     positions = await adapter.list_positions()
     assert client.account_calls == 2
