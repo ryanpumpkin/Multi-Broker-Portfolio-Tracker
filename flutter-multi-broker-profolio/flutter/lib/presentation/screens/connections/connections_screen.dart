@@ -11,31 +11,42 @@ import '../../../state/state.dart';
 import '../../widgets/widgets.dart';
 import '../shared/presentation_scaffold.dart';
 
-/// Per-broker credential field definitions. Each entry is
-/// (jsonKey, displayLabel, obscure).
-const Map<ConnectionKind, List<(String, String, bool)>> _credentialFields = {
+/// Per-broker credential field definitions.
+/// Each entry is (jsonKey, displayLabel, obscure, optional).
+/// When optional is true, the field may be left blank and no validation error
+/// is raised; it is still included in the credentials JSON (as an empty string)
+/// so the backend can detect its presence.
+const Map<ConnectionKind, List<(String, String, bool, bool)>>
+    _credentialFields = {
   ConnectionKind.longbridge: [
-    ('appKey', 'App Key', false),
-    ('appSecret', 'App Secret', true),
-    ('accessToken', 'Access Token', true),
+    ('appKey', 'App Key', false, false),
+    ('appSecret', 'App Secret', true, false),
+    ('accessToken', 'Access Token', true, false),
   ],
   ConnectionKind.ibkr: [
-    ('username', 'Username', false),
-    ('password', 'Password', true),
-    ('tradingMode', 'Trading Mode (paper/live)', false),
+    ('username', 'Username', false, false),
+    ('password', 'Password', true, false),
+    ('tradingMode', 'Trading Mode (paper/live)', false, false),
+    // accountId is optional — leave blank to let the gateway use its own
+    // logged-in account (common for Client Portal Web API).
+    ('accountId', 'Account ID (optional, e.g. U1234567)', false, true),
   ],
   ConnectionKind.futu: [
-    ('account', 'Account', false),
-    ('password', 'Password', true),
-    ('host', 'OpenD Host', false),
-    ('port', 'OpenD Port', false),
+    ('account', 'Account', false, false),
+    ('password', 'Password', true, false),
+    ('host', 'OpenD Host', false, false),
+    ('port', 'OpenD Port', false, false),
+    // Trade unlock password is captured per request and never persisted in
+    // plaintext. It travels through the same E2E envelope as the other
+    // credentials and is consumed by FutuAdapter._unlocked on each call.
+    ('tradeUnlockPassword', 'Trade Unlock Password', true, false),
   ],
   ConnectionKind.binance: [
-    ('apiKey', 'API Key', false),
-    ('apiSecret', 'API Secret', true),
-    ('region', 'Region (com / us)', false),
+    ('apiKey', 'API Key', false, false),
+    ('apiSecret', 'API Secret', true, false),
+    ('region', 'Region (com / us)', false, false),
   ],
-  ConnectionKind.manual: [],
+  ConnectionKind.manual: <(String, String, bool, bool)>[],
 };
 
 class ConnectionsScreen extends ConsumerWidget {
@@ -228,7 +239,8 @@ class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
     setState(() => _saving = true);
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
-    final fields = _credentialFields[_kind] ?? const [];
+    final fields = _credentialFields[_kind] ??
+        const <(String, String, bool, bool)>[];
     final labelText = _label.text.trim();
     final kind = _kind;
     final mode = _mode;
@@ -247,7 +259,7 @@ class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
 
       if (fields.isNotEmpty) {
         final creds = <String, String>{
-          for (final (key, _, _) in fields)
+          for (final (key, _, _, _) in fields)
             key: _credCtrls[key]?.text.trim() ?? '',
         };
         final key = ref.read(credentialKeyProvider);
@@ -284,7 +296,8 @@ class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final fields = _credentialFields[_kind] ?? const [];
+    final fields = _credentialFields[_kind] ??
+        const <(String, String, bool, bool)>[];
     return AlertDialog(
       title: const Text('Add connection'),
       content: SizedBox(
@@ -360,7 +373,7 @@ class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
                   ),
                   const SizedBox(height: 8),
                   ...fields.map((f) {
-                    final (key, lbl, obscure) = f;
+                    final (key, lbl, obscure, optional) = f;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: TextFormField(
@@ -369,12 +382,14 @@ class _AddConnectionDialogState extends ConsumerState<_AddConnectionDialog> {
                         obscureText: obscure,
                         enabled: !_saving,
                         decoration: InputDecoration(labelText: lbl),
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return '$lbl is required';
-                          }
-                          return null;
-                        },
+                        validator: optional
+                            ? null
+                            : (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return '$lbl is required';
+                                }
+                                return null;
+                              },
                       ),
                     );
                   }),

@@ -98,6 +98,178 @@ async def test_positions_and_balances_mapping() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_positions_calls_tickle_first() -> None:
+    """tickle() must be called before fetch_positions() on every request."""
+    client = FakeIbkrClient(
+        positions=[
+            {
+                "acctId": "U1",
+                "contractDesc": "AAPL",
+                "position": "5",
+                "currency": "USD",
+                "secType": "STK",
+            }
+        ]
+    )
+    adapter = IbkrAdapter(client, retry=_no_jitter())
+    await adapter.list_positions()
+    assert client.tickle_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_list_balances_calls_tickle_first() -> None:
+    """tickle() must be called before fetch_account_summary() on every request."""
+    client = FakeIbkrClient(
+        accounts=[{"acctId": "U1", "currency": "USD", "cashBalance": "500"}]
+    )
+    adapter = IbkrAdapter(client, retry=_no_jitter())
+    await adapter.list_balances()
+    assert client.tickle_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_non_stk_positions_filtered_out() -> None:
+    """Only secType == 'STK' positions should be returned (v1 scope)."""
+    client = FakeIbkrClient(
+        positions=[
+            {
+                "acctId": "U1",
+                "contractDesc": "AAPL",
+                "position": "10",
+                "avgCost": "150",
+                "currency": "USD",
+                "secType": "STK",
+            },
+            {
+                "acctId": "U1",
+                "contractDesc": "EUR.USD",
+                "position": "5000",
+                "avgCost": "1.08",
+                "currency": "USD",
+                "secType": "CASH",
+            },
+            {
+                "acctId": "U1",
+                "contractDesc": "AAPL   DEC2026",
+                "position": "3",
+                "avgCost": "800",
+                "currency": "USD",
+                "secType": "OPT",
+            },
+            {
+                "acctId": "U1",
+                "contractDesc": "ES",
+                "position": "1",
+                "avgCost": "5100",
+                "currency": "USD",
+                "secType": "FUT",
+            },
+        ]
+    )
+    adapter = IbkrAdapter(client, retry=_no_jitter())
+    positions = await adapter.list_positions()
+    assert len(positions) == 1
+    assert positions[0].symbol == "AAPL"
+
+
+@pytest.mark.asyncio
+async def test_positions_without_sectype_included() -> None:
+    """Positions with secType=None (e.g. older rows missing the field) pass through."""
+    client = FakeIbkrClient(
+        positions=[
+            {
+                "acctId": "U1",
+                "contractDesc": "GOOG",
+                "position": "2",
+                "currency": "USD",
+            }
+        ]
+    )
+    adapter = IbkrAdapter(client, retry=_no_jitter())
+    positions = await adapter.list_positions()
+    assert len(positions) == 1
+    assert positions[0].symbol == "GOOG"
+
+
+@pytest.mark.asyncio
+async def test_market_value_fallback_tiers() -> None:
+    """Three-tier fallback: explicit mktValue -> last_price*qty -> avg_cost*qty."""
+    # Tier 2: last_price * quantity when mktValue absent.
+    client = FakeIbkrClient(
+        positions=[
+            {
+                "acctId": "U1",
+                "contractDesc": "MSFT",
+                "position": "4",
+                "avgCost": "300",
+                "mktPrice": "320",
+                "currency": "USD",
+                "secType": "STK",
+            }
+        ]
+    )
+    adapter = IbkrAdapter(client, retry=_no_jitter())
+    positions = await adapter.list_positions()
+    assert positions[0].market_value == Decimal("4") * Decimal("320")
+
+    # Tier 3: avg_cost * quantity when both mktValue and mktPrice absent.
+    client2 = FakeIbkrClient(
+        positions=[
+            {
+                "acctId": "U1",
+                "contractDesc": "NVDA",
+                "position": "3",
+                "avgCost": "200",
+                "currency": "USD",
+                "secType": "STK",
+            }
+        ]
+    )
+    adapter2 = IbkrAdapter(client2, retry=_no_jitter())
+    positions2 = await adapter2.list_positions()
+    assert positions2[0].market_value == Decimal("3") * Decimal("200")
+
+
+@pytest.mark.asyncio
+async def test_cost_basis_is_avg_cost_per_share() -> None:
+    """avgCost is the per-share cost; cost_basis field = avgCost (stored in avg_cost)."""
+    client = FakeIbkrClient(
+        positions=[
+            {
+                "acctId": "U1",
+                "contractDesc": "TSLA",
+                "position": "10",
+                "avgCost": "185.50",
+                "mktValue": "1950",
+                "currency": "USD",
+                "secType": "STK",
+            }
+        ]
+    )
+    adapter = IbkrAdapter(client, retry=_no_jitter())
+    positions = await adapter.list_positions()
+    assert positions[0].avg_cost == Decimal("185.50")
+    # market_value from explicit mktValue field, not recomputed
+    assert positions[0].market_value == Decimal("1950")
+
+
+@pytest.mark.asyncio
+async def test_balances_multiple_currencies() -> None:
+    """Multiple currencies appear as separate CashBalance rows."""
+    client = FakeIbkrClient(
+        accounts=[
+            {"acctId": "U1", "currency": "USD", "cashBalance": "12345.67"},
+            {"acctId": "U1", "currency": "HKD", "cashBalance": "8000.00"},
+        ]
+    )
+    adapter = IbkrAdapter(client, retry=_no_jitter())
+    balances = await adapter.list_balances()
+    assert len(balances) == 2
+    currencies = {b.currency for b in balances}
+    assert currencies == {"USD", "HKD"}
+
+
+@pytest.mark.asyncio
 async def test_positions_retries_transient_then_succeeds() -> None:
     client = FakeIbkrClient(
         positions=[
