@@ -54,10 +54,28 @@ class LongbridgeClient:  # pragma: no cover - integration exercised via env-gate
         # each with its own `.positions`. Some older SDK versions
         # returned the list directly, so we handle both shapes.
         result = await _to_thread(self._trade_ctx.stock_positions)
+        import logging
+        log = logging.getLogger("mbp.longbridge.client")
+        log.info(
+            "stock_positions raw response type=%s repr=%s",
+            type(result).__name__,
+            repr(result)[:1500],
+        )
         channels = _to_iterable(result, attribute="channels")
+        log.info("stock_positions channel_count=%d", len(channels))
         raw_rows: list[Any] = []
-        for channel in channels:
+        for idx, channel in enumerate(channels):
+            ch_name = getattr(channel, "account_channel", None) or getattr(
+                channel, "channel", None,
+            )
             positions = getattr(channel, "positions", None)
+            n = len(list(positions)) if positions is not None else 0
+            log.info(
+                "stock_positions channel[%d] name=%s positions=%d",
+                idx,
+                ch_name,
+                n,
+            )
             if positions is None:
                 raw_rows.append(channel)
                 continue
