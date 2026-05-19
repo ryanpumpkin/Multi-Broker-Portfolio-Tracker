@@ -1,1 +1,1 @@
-2026-05-19T00:10:00Z · last_wave=1 · next_wave=2 · in_progress=broker-integration-binance,broker-integration-ibkr,broker-integration-futu · blocked=
+2026-05-19T00:30:00Z · last_wave=2 · next_wave=3 · in_progress=transactions-history · blocked=
