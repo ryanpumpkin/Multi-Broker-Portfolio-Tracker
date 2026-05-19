@@ -17,7 +17,7 @@ import importlib
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Protocol, cast
@@ -39,6 +39,9 @@ from app.models.domain import (
 )
 
 SOURCE_NAME = "binance"
+_STABLE_ASSETS = {"USDT", "USDC", "BUSD", "USD"}
+_MAX_TRADE_SYMBOLS = 20
+_MAX_MY_TRADES_PER_CALL = 1000
 
 
 class BinanceHost(StrEnum):
@@ -251,15 +254,18 @@ def _map_quote(raw: dict[str, Any]) -> Quote:
     )
 
 
+def _trade_timestamp_ms(raw: dict[str, Any]) -> int:
+    value = raw.get("time")
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _assert_read_only(account: dict[str, Any]) -> None:
     """Reject keys with trade or withdraw permissions enabled."""
-    perms = account.get("permissions") or []
-    forbidden = {"SPOT", "MARGIN", "FUTURES", "TRD_GRP_002"}
-    bad = [p for p in perms if isinstance(p, str) and p.upper() in forbidden]
-    if bad:
-        raise PermanentError(
-            f"Binance API key has non-read permissions {bad}; refuse to use"
-        )
     if account.get("canTrade") or account.get("canWithdraw"):
         raise PermanentError(
             "Binance API key allows trade/withdraw; refuse to use"
@@ -336,15 +342,91 @@ class BinanceAdapter(SourceAdapter):
                 return _dec(row["close"]), quote_currency
         return None, None
 
+    @staticmethod
+    def _nonzero_balances(account: dict[str, Any]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for row in account.get("balances", []):
+            if not isinstance(row, dict):
+                continue
+            qty = _dec(row.get("free", "0")) + _dec(row.get("locked", "0"))
+            if qty > 0:
+                out.append(row)
+        return out
+
+    async def _price_lookup_for_account(
+        self,
+        account: dict[str, Any],
+    ) -> dict[str, tuple[Decimal, str]]:
+        prices: dict[str, tuple[Decimal, str]] = {}
+        symbols: list[str] = []
+        asset_by_symbol: dict[str, str] = {}
+        for row in self._nonzero_balances(account):
+            asset = row.get("asset")
+            if not isinstance(asset, str) or asset in _STABLE_ASSETS:
+                continue
+            symbol = f"{asset}USDT"
+            if symbol in asset_by_symbol:
+                continue
+            symbols.append(symbol)
+            asset_by_symbol[symbol] = asset
+
+        if symbols:
+            async def _fetch_prices() -> list[dict[str, Any]]:
+                return await self._client.get_ticker_prices(symbols)
+
+            for row in cast(list[dict[str, Any]], await self._call(_fetch_prices)):
+                symbol_raw = row.get("symbol")
+                price = row.get("price")
+                if not isinstance(symbol_raw, str) or price is None:
+                    continue
+                asset = asset_by_symbol.get(symbol_raw)
+                if asset is None:
+                    continue
+                prices[asset] = (_dec(price), _infer_quote_currency(symbol_raw))
+
+        # Fallback for symbols that don't have a direct ticker quote.
+        for row in self._nonzero_balances(account):
+            asset = row.get("asset")
+            if not isinstance(asset, str) or asset in _STABLE_ASSETS or asset in prices:
+                continue
+            price, quote_currency = await self._price_from_klines(asset=asset)
+            if price is not None:
+                prices[asset] = (price, quote_currency or "USD")
+        return prices
+
+    @staticmethod
+    def _default_since_ms(now: datetime | None = None) -> str:
+        at = now if now is not None else datetime.now(UTC)
+        return str(int((at - timedelta(days=90)).timestamp() * 1000))
+
+    def _trade_symbols_for_account(self, account: dict[str, Any]) -> list[str]:
+        symbols: list[str] = []
+        seen: set[str] = set()
+        for row in self._nonzero_balances(account):
+            asset = row.get("asset")
+            if not isinstance(asset, str) or asset in _STABLE_ASSETS:
+                continue
+            symbol = f"{asset}USDT"
+            if symbol in seen:
+                continue
+            symbols.append(symbol)
+            seen.add(symbol)
+            if len(symbols) >= _MAX_TRADE_SYMBOLS:
+                break
+        return symbols
+
     async def list_positions(self) -> list[Position]:
         account = await self._get_verified_account()
+        prices = await self._price_lookup_for_account(account)
         out: list[Position] = []
         for row in account.get("balances", []):
             price: Decimal | None = None
             price_currency: str | None = None
             asset = row.get("asset")
-            if isinstance(asset, str) and asset not in {"USDT", "USDC", "BUSD", "USD"}:
-                price, price_currency = await self._price_from_klines(asset=asset)
+            if isinstance(asset, str):
+                priced = prices.get(asset)
+                if priced is not None:
+                    price, price_currency = priced
             pos = _spot_balance_to_position(
                 row,
                 last_price=price,
@@ -369,24 +451,33 @@ class BinanceAdapter(SourceAdapter):
         since: str | None = None,
         limit: int | None = None,
     ) -> list[Transaction]:
-        await self._ensure_verified()
-
-        async def _trades() -> list[dict[str, Any]]:
-            return await self._client.get_my_trades(symbol=None, since=since, limit=limit)
+        account = await self._get_verified_account()
+        since_ms = since if since is not None else self._default_since_ms()
+        symbols = self._trade_symbols_for_account(account)
+        trades: list[dict[str, Any]] = []
+        for symbol in symbols:
+            async def _trades_for_symbol(symbol_for_call: str = symbol) -> list[dict[str, Any]]:
+                return await self._client.get_my_trades(
+                    symbol=symbol_for_call,
+                    since=since_ms,
+                    limit=limit,
+                )
+            trades.extend(cast(list[dict[str, Any]], await self._call(_trades_for_symbol)))
 
         async def _deposits() -> list[dict[str, Any]]:
-            return await self._client.get_deposit_history(since=since)
+            return await self._client.get_deposit_history(since=since_ms)
 
         async def _withdrawals() -> list[dict[str, Any]]:
-            return await self._client.get_withdraw_history(since=since)
+            return await self._client.get_withdraw_history(since=since_ms)
 
-        trades = await self._call(_trades)
         deposits = await self._call(_deposits)
         withdrawals = await self._call(_withdrawals)
         out: list[Transaction] = [_map_trade(t) for t in trades]
         out.extend(_map_deposit(d) for d in deposits)
         out.extend(_map_withdrawal(w) for w in withdrawals)
         out.sort(key=lambda tx: tx.timestamp)
+        if limit is not None and limit >= 0 and len(out) > limit:
+            out = out[-limit:]
         return out
 
     async def stream_quotes(self, symbols: Iterable[str]) -> AsyncIterator[Quote]:
@@ -462,7 +553,11 @@ class HttpxBinanceClient:  # pragma: no cover - real network wrapper
         try:
             return int(value)
         except ValueError:
-            return None
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            return int(parsed.timestamp() * 1000)
 
     @staticmethod
     def _translate_exception(exc: Exception) -> Exception:
@@ -485,22 +580,49 @@ class HttpxBinanceClient:  # pragma: no cover - real network wrapper
     async def get_my_trades(
         self, *, symbol: str | None, since: str | None, limit: int | None
     ) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"symbol": symbol}
-        start_time = self._to_int_ms(since)
-        if start_time is not None:
-            params["startTime"] = start_time
-        if limit is not None:
-            params["limit"] = limit
         sdk = await self._sdk_client()
-        try:
-            response = await sdk.get_my_trades(**params)
-        except Exception as exc:
-            if symbol is None:
-                return []
-            raise self._translate_exception(exc) from exc
-        if not isinstance(response, list):
-            raise PermanentError("Unexpected Binance myTrades response shape")
-        return [item for item in response if isinstance(item, dict)]
+        if symbol is None:
+            return []
+
+        end_time = int(datetime.now(UTC).timestamp() * 1000)
+        start_time = self._to_int_ms(since)
+        if start_time is None:
+            start_time = int((datetime.now(UTC) - timedelta(days=90)).timestamp() * 1000)
+
+        out: list[dict[str, Any]] = []
+        cursor = start_time
+        remaining = limit if limit is not None and limit >= 0 else None
+        while cursor <= end_time:
+            page_size = _MAX_MY_TRADES_PER_CALL
+            if remaining is not None:
+                if remaining <= 0:
+                    break
+                page_size = min(page_size, remaining)
+            params: dict[str, Any] = {
+                "symbol": symbol,
+                "startTime": cursor,
+                "endTime": end_time,
+                "limit": page_size,
+            }
+            try:
+                response = await sdk.get_my_trades(**params)
+            except Exception as exc:
+                raise self._translate_exception(exc) from exc
+            if not isinstance(response, list):
+                raise PermanentError("Unexpected Binance myTrades response shape")
+            page = [item for item in response if isinstance(item, dict)]
+            if not page:
+                break
+            out.extend(page)
+            if remaining is not None:
+                remaining -= len(page)
+            if len(page) < page_size:
+                break
+            last_ts = _trade_timestamp_ms(page[-1])
+            cursor = max(cursor + 1, last_ts + 1)
+
+        out.sort(key=_trade_timestamp_ms)
+        return out
 
     async def get_deposit_history(self, *, since: str | None) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
