@@ -1,1 +1,1 @@
-2026-05-19T01:10:00Z · last_wave=4 · next_wave=5 · in_progress=final-report · blocked=
+2026-05-20T00:00:00Z · last_wave=5 · next_wave=done · in_progress= · blocked=

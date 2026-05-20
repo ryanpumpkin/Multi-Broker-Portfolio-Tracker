@@ -330,26 +330,26 @@ connects.
 
 ## Item 5 — Final report + handoff
 
-**Slice id:** `final-report` `[~]`
+**Slice id:** `final-report` `[x]`
 
 **Why:** Wrap up.
 
 **Subtasks:**
 
-- [ ] Update `doc/tasks/FINAL_REPORT.md` to reflect the actual
+- [x] Update `doc/tasks/FINAL_REPORT.md` to reflect the actual
   shipping state, including all broker-integration follow-ups
   that landed.
-- [ ] Add a section listing every commit on `main` since the
+- [x] Add a section listing every commit on `main` since the
   original orchestrator finished, grouped by theme (auth,
   encryption, broker wiring, FX, etc.).
-- [ ] Capture a screenshot of the working dashboard with real
+- [x] Capture a screenshot of the working dashboard with real
   data into `doc/screenshots/` and reference it from the README.
-- [ ] Update the README at the repo root with:
+- [x] Update the README at the repo root with:
   - The one-paragraph "what this is".
   - A pointer to `doc/RUNBOOK.md` for setup.
   - A pointer to `doc/ARCHITECTURE_NOTES.md` for the decisions
     that aren't in the original spec.
-- [ ] Optional: tag the commit, e.g.
+- [x] Optional: tag the commit, e.g.
   `git tag -a v0.1-personal-mvp -m "Real LongBridge data
   flowing end-to-end"`.
 

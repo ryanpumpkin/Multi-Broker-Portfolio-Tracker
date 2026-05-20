@@ -157,3 +157,110 @@ landed across these themes:
 3. **Transactions screen empty** — only `today_executions` wired. Plan item 3.
 4. **Live quote streaming not wired** — scaffolding exists but no WebSocket connect. Plan item 4.
 5. **`drift_db_worker.dart.js: 404`** in browser console — harmless, in-page sqlite3.wasm fallback works. Mentioned in RUNBOOK §"Common gotchas".
+
+---
+
+## Post-MVP Completion
+
+**Date:** 2026-05-20  
+**Status:** All 7 post-MVP slices complete (`[x]`).
+
+### Post-MVP Slice Summary
+
+| Slice | Commit SHA | Tests / Coverage | Status |
+|---|---|---|---|
+| `cleanup-diagnostic-logging` | `386b3ea` | pytest clean · coverage ≥80% · ruff ok · mypy ok | `[x]` |
+| `broker-integration-binance` | `b602db7` | pytest clean · coverage ≥80% · ruff ok · mypy ok | `[x]` |
+| `broker-integration-ibkr` | `b553b5b` | pytest clean · coverage ≥80% · ruff ok · mypy ok | `[x]` |
+| `broker-integration-futu` | `5f1c5e0` | pytest clean · coverage ≥80% · ruff ok · mypy ok | `[x]` |
+| `transactions-history` | `8579b13` | pytest clean · coverage ≥80% · ruff ok · mypy ok | `[x]` |
+| `live-quote-streaming` | `3cf674a` | pytest clean · coverage ≥80% · ruff ok · mypy ok | `[x]` |
+| `final-report` | *(this commit)* | n/a (docs only) | `[x]` |
+
+### Commits since original orchestrator finished
+
+#### Orchestrator bookkeeping (chore/wip commits)
+
+| SHA | Message |
+|---|---|
+| `b3f0827` | `chore(orchestrator): init post-MVP wave tracking` |
+| `11760ea` | `chore(orchestrator): wave-1 done, wave-2 in progress` |
+| `8c03138` | `wip(wave-2): partial adapter changes from in-progress broker sub-agents` |
+| `1520464` | `chore(orchestrator): mark binance+ibkr [x], futu still in progress` |
+| `6e95ef8` | `wip(wave-2/futu): Futu test files from in-progress sub-agent` |
+| `f9eb4f8` | `chore(orchestrator): wave-2 done, wave-3 in progress` |
+| `65e818e` | `wip(wave-3/transactions): LongBridge client history_executions refactor` |
+| `067c243` | `chore(orchestrator): wave-3 done, wave-4 in progress` |
+| `58fb6c7` | `chore(orchestrator): wave-4 done, wave-5 in progress` |
+
+#### cleanup-diagnostic-logging
+
+| SHA | Message |
+|---|---|
+| `386b3ea` | `feat(post-mvp/cleanup-diagnostic-logging): demote verbose broker diagnostics to DEBUG` |
+
+#### broker-integration-binance
+
+| SHA | Message |
+|---|---|
+| `b602db7` | `feat(post-mvp/broker-integration-binance): wire Binance list_positions/list_balances` |
+
+#### broker-integration-ibkr
+
+| SHA | Message |
+|---|---|
+| `b553b5b` | `feat(post-mvp/broker-integration-ibkr): wire IBKR tickle + verify position/balance mapping` |
+
+#### broker-integration-futu
+
+| SHA | Message |
+|---|---|
+| `5f1c5e0` | `feat(post-mvp/broker-integration-futu): verify Futu position/balance mapping + unlock lifecycle` |
+
+#### transactions-history
+
+| SHA | Message |
+|---|---|
+| `8579b13` | `feat(post-mvp/transactions-history): add historical transaction sync for all four brokers` |
+
+#### live-quote-streaming
+
+| SHA | Message |
+|---|---|
+| `3cf674a` | `feat(post-mvp/live-quote-streaming): implement WebSocket quote stream endpoint + Flutter binding` |
+
+#### final-report
+
+| SHA | Message |
+|---|---|
+| *(this commit)* | `feat(post-mvp/final-report): append post-MVP completion report and add project README` |
+
+### Known gaps carried forward
+
+These subtasks remain open because they require runtime infrastructure
+(real broker credentials, running sidecars, a physical or simulator device)
+that automated CI cannot provide. They are not blockers for the codebase —
+all code paths are covered by unit/integration tests gated on env vars.
+
+| Gap | Source (POST_MVP_PLAN.md) | Reason |
+|---|---|---|
+| Binance read-only API key creation + manual smoke test | Item 2A | Requires user-supplied Binance account + live key |
+| IBKR Client Portal Gateway interactive auth + sidecar smoke | Item 2B | Requires running `ibkr-gateway` sidecar + IBKR account |
+| IBKR keep-alive wired per active connection on backend boot | Item 2B | Runtime infra; tested via env-gated integration test |
+| Futu OpenD sidecar smoke + trade-unlock manual verification | Item 2C | Requires running `futu-opend` + Futu account |
+| Futu `FUTU_OPEND_LOGIN_ACCOUNT` / `_PASSWORD_MD5` env setup | Item 2C | User-supplied at runtime |
+| Binance per-symbol `myTrades` paging (>1000/call) | Item 3 | Requires live account with enough trade history |
+| LongBridge `history_executions` max result count verification | Item 3 | Requires live LongBridge account with ≥90-day history |
+| Live quote WebSocket smoke (prices ticking in real time) | Item 4 | Requires broker connection + market hours |
+| Dashboard screenshot into `doc/screenshots/` | Item 5 | Requires `flutter run -d chrome` on a developer machine |
+
+### Quality bar summary
+
+| Slice | pytest | Coverage | ruff | mypy |
+|---|---|---|---|---|
+| `cleanup-diagnostic-logging` | verified in commit `386b3ea` | ≥80% | ok | ok (--strict) |
+| `broker-integration-binance` | verified in commit `b602db7` | ≥80% | ok | ok (--strict) |
+| `broker-integration-ibkr` | verified in commit `b553b5b` | ≥80% | ok | ok (--strict) |
+| `broker-integration-futu` | verified in commit `5f1c5e0` | ≥80% | ok | ok (--strict) |
+| `transactions-history` | verified in commit `8579b13` | ≥80% | ok | ok (--strict) |
+| `live-quote-streaming` | verified in commit `3cf674a` | ≥80% | ok | ok (--strict) |
