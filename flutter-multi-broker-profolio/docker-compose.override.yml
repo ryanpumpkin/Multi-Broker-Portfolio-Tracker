@@ -52,10 +52,9 @@ services:
       IBKR_PASSWORD: "dev-placeholder"
       IBKR_TRADING_MODE: paper
 
-  futu-opend:
-    environment:
-      FUTU_OPEND_LOGIN_ACCOUNT: "dev-placeholder"
-      FUTU_OPEND_LOGIN_PASSWORD_MD5: "dev-placeholder"
+  # futu-opend reads its credentials from .env via the base compose file
+  # so we can iterate against a real Futu account in local dev. To run
+  # with placeholders, re-add the overrides here.
 
   # ── Firebase Local Emulator Suite ───────────────────────────────────────────
   firebase-emulator:

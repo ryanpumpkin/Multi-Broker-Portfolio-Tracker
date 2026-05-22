@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/crypto/e2e.dart';
 import 'app_lock_provider.dart';
+import 'auth_provider.dart';
 
 /// Holds the AES-GCM key used to encrypt broker credentials, derived from
 /// the user's PIN + a per-user salt via Argon2id.
@@ -28,6 +29,10 @@ final e2eCryptoProvider = Provider<E2eCrypto>(
 class CredentialKeyController extends Notifier<E2eKey?> {
   @override
   E2eKey? build() {
+    // Reset the key whenever the signed-in user changes (sign-in or
+    // sign-out). The salt is scoped per-uid, so a stale key from a prior
+    // session would be wrong for the new account.
+    ref.watch(authProvider.select((auth) => auth.valueOrNull?.uid));
     // Clear the key whenever the lock state flips back to locked.
     ref.listen(appLockProvider, (previous, next) {
       final wasUnlocked = previous?.valueOrNull?.isLocked == false;

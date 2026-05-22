@@ -4,8 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/repositories/auth_repository_impl.dart';
 import '../domain/domain.dart';
-import 'app_lock_provider.dart';
-import 'credential_key_provider.dart';
 import 'notifications_provider.dart';
 import 'repository_providers.dart';
 
@@ -82,12 +80,6 @@ class AuthController extends AsyncNotifier<AuthUser?> {
     try {
       await ref.read(notificationLifecycleProvider).onBeforeSignOut();
       await ref.read(authRepositoryProvider).signOut();
-      // Drop the cached app-lock + credential-key state so the next sign-in
-      // re-reads from secure storage and re-derives the encryption key.
-      // Without this, hasPin/isEnabled stay sticky in Riverpod and the
-      // connections screen sees a stale snapshot of the previous session.
-      ref.invalidate(credentialKeyProvider);
-      ref.invalidate(appLockProvider);
       state = const AsyncData(null);
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);

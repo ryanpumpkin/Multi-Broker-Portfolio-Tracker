@@ -4,10 +4,16 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app_lock/app_lock.dart';
+import 'auth_provider.dart';
 import 'credential_key_provider.dart';
 
 final appLockStoreProvider = Provider<AppLockStore>(
-  (ref) => SecureAppLockStore(),
+  (ref) {
+    // Scope PIN/salt/settings to the current user so each account has its
+    // own credentials. The store rebuilds when the uid changes.
+    final uid = ref.watch(authProvider).valueOrNull?.uid;
+    return SecureAppLockStore(null, uid);
+  },
 );
 
 final appLockPinHasherProvider = Provider<PinHasher>(
@@ -85,6 +91,9 @@ class AppLockController extends AsyncNotifier<AppLockState> {
 
   @override
   Future<AppLockState> build() async {
+    // Rebuild when the signed-in user changes so PIN state matches the
+    // current account. appLockStoreProvider scopes its keys by uid.
+    ref.watch(authProvider.select((auth) => auth.valueOrNull?.uid));
     final settings = await _store.readSettings();
     final hasPin = (await _store.readPinHash()) != null;
     return AppLockState(

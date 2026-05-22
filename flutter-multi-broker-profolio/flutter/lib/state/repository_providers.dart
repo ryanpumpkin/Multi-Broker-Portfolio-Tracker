@@ -3,8 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/local/database/app_database.dart';
-import '../data/local/secure_storage/secure_storage_adapter.dart';
-import '../data/local/secure_storage/secure_store.dart';
 import '../data/remote/backend_client/backend_client.dart';
 import '../data/remote/backend_client/backend_config.dart';
 import '../data/remote/backend_client/quotes_stream.dart';
@@ -75,14 +73,15 @@ final currentUserIdProvider = StreamProvider<String?>((ref) {
 
 final authRepositoryProvider = Provider<AuthRepository>(
   (ref) {
-    final secureStore = SecureStore(
-      FallbackKeyValueStore(primary: FlutterSecureStorageAdapter()),
-    );
+    // Sign-out used to wipe all of flutter_secure_storage as a "clear
+    // session secrets" measure, but that also nuked the user's PIN hash,
+    // salt, and cached credential blobs — forcing them to re-set the PIN
+    // and re-add connections on every sign-in. Now that PIN/salt are
+    // scoped by uid in secure storage, leaving data behind is safe (a
+    // different account can't read another's scoped keys), so we sign
+    // out of Firebase without touching local storage.
     return AuthRepositoryImpl(
       FirebaseAuthAdapter(FirebaseAuth.instance),
-      sessionCleaner: CompositeAuthSessionCleaner([
-        SecureStoreAuthSessionCleaner(secureStore),
-      ]),
     );
   },
 );
