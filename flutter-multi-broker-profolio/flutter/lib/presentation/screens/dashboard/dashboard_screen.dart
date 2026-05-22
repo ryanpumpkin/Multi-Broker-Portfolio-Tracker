@@ -93,7 +93,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ),
       ],
       body: RefreshIndicator(
-        onRefresh: () => ref.read(portfolioProvider.notifier).refresh(),
+        // Route pull-to-refresh through the same PIN gate as the manual
+        // refresh button so it doesn't fire a request without wrapped
+        // credentials and overwrite the screen with source_health=down.
+        onRefresh: () => _refreshWithPinGate(context, ref),
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
