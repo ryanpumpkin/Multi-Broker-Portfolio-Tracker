@@ -24,9 +24,14 @@ class PortfolioController extends AsyncNotifier<PortfolioSnapshot> {
   Future<PortfolioSnapshot> build() async {
     final settings = await ref.watch(settingsProvider.future);
     _baseCurrency = settings.baseCurrency;
+    // Cache-only on initial build: we never fire a backend call here
+    // because the credential key may not be derived yet (the user has
+    // to enter their PIN first). The dashboard explicitly calls
+    // refresh() after PIN entry, which is the path that hits the
+    // network with proper wrapped credentials.
     return ref
         .read(getAggregatedPortfolioProvider)
-        .call(baseCurrency: _baseCurrency);
+        .callCached(baseCurrency: _baseCurrency);
   }
 
   Future<void> refresh() async {

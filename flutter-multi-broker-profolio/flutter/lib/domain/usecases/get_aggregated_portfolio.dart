@@ -28,8 +28,25 @@ class GetAggregatedPortfolio {
 
   static const String manualSourceId = 'manual';
 
+  /// Cache-only variant — never hits the network. Used on app launch so
+  /// the UI can render the last-known positions immediately while we
+  /// wait for the user to enter their PIN (required for live broker
+  /// calls). Manual holdings are still applied on top of the cache.
+  Future<PortfolioSnapshot> callCached({required String baseCurrency}) async {
+    final snapshot =
+        await _portfolio.getCachedSnapshot(baseCurrency: baseCurrency);
+    return _withManualHoldings(snapshot, baseCurrency);
+  }
+
   Future<PortfolioSnapshot> call({required String baseCurrency}) async {
     final snapshot = await _portfolio.getSnapshot(baseCurrency: baseCurrency);
+    return _withManualHoldings(snapshot, baseCurrency);
+  }
+
+  Future<PortfolioSnapshot> _withManualHoldings(
+    PortfolioSnapshot snapshot,
+    String baseCurrency,
+  ) async {
     final manuals = await _manualHoldings.list();
     if (manuals.isEmpty) return snapshot;
 

@@ -70,6 +70,13 @@ class PortfolioRepositoryImpl implements PortfolioRepository {
   }
 
   @override
+  Future<PortfolioSnapshot> getCachedSnapshot({
+    required String baseCurrency,
+  }) {
+    return _buildSnapshotFromCache(baseCurrency);
+  }
+
+  @override
   Stream<PortfolioSnapshot> watchSnapshot({
     required String baseCurrency,
   }) async* {

@@ -38,6 +38,12 @@ class FakePortfolioRepository implements PortfolioRepository {
       snapshot;
 
   @override
+  Future<PortfolioSnapshot> getCachedSnapshot({
+    required String baseCurrency,
+  }) async =>
+      snapshot;
+
+  @override
   Stream<PortfolioSnapshot> watchSnapshot({required String baseCurrency}) =>
       Stream<PortfolioSnapshot>.value(snapshot);
 }

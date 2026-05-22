@@ -8,11 +8,68 @@ import '../../../state/state.dart';
 import '../../widgets/widgets.dart';
 import '../shared/presentation_scaffold.dart';
 
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  bool _promptedForPin = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // After first frame, kick off the initial portfolio refresh — gated
+    // on the credential key being available (prompt for PIN if needed).
+    // The provider's build() only loads from cache so the dashboard is
+    // never blocked on the network; the actual broker fetch happens
+    // here, exactly once per dashboard mount.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initialRefresh());
+  }
+
+  Future<void> _initialRefresh() async {
+    if (_promptedForPin || !mounted) return;
+    _promptedForPin = true;
+    try {
+      final connectionsState = await ref.read(connectionsProvider.future);
+      if (!mounted) return;
+      final hasE2eConnections = connectionsState.connections.any(
+        (c) =>
+            c.credentialMode == CredentialMode.e2e &&
+            c.status != ConnectionStatus.disabled,
+      );
+
+      // If there are e2e connections and no key yet, prompt for the
+      // PIN so the upcoming refresh has wrapped creds.
+      if (hasE2eConnections && ref.read(credentialKeyProvider) == null) {
+        final lock = await ref.read(appLockProvider.future);
+        if (!lock.hasPin || !mounted) return;
+        await showDialog<void>(
+          context: context,
+          builder: (_) => const _DashboardPinDialog(),
+        );
+        if (!mounted) return;
+        if (ref.read(credentialKeyProvider) == null) {
+          // User cancelled or PIN was wrong — skip the network call so
+          // we don't overwrite the cached snapshot with a bad
+          // source_health.
+          return;
+        }
+      }
+
+      if (!mounted) return;
+      await ref.read(portfolioProvider.notifier).refresh();
+    } catch (_) {
+      // Swallow — this is best-effort refresh on mount. If the widget
+      // tree is torn down (test disposal, route switch) before the
+      // futures resolve we don't want to crash.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final portfolio = ref.watch(portfolioProvider);
     final connections = ref.watch(connectionsProvider);
 
@@ -154,6 +211,12 @@ class DashboardScreen extends ConsumerWidget {
     }
 
     if (!context.mounted) return;
+    // Only fire the network refresh if we actually have a key for the
+    // active E2E connections — otherwise the request goes out without
+    // wrapped credentials and the backend reports source_health=down
+    // for everything, overwriting whatever we already have on screen.
+    final keyReady = ref.read(credentialKeyProvider) != null;
+    if (hasE2eConnections && !keyReady) return;
     await ref.read(portfolioProvider.notifier).refresh();
   }
 

@@ -224,9 +224,13 @@ void main() {
         snapshot.positions.where((p) => p.sourceId == 'manual'),
         hasLength(1),
       );
+      // Initial load uses the cached repo path (no network call), so
+      // getSnapshot has not been hit yet.
+      expect(portfolioRepo.calls, 0);
 
       await container.read(portfolioProvider.notifier).refresh();
-      expect(portfolioRepo.calls, 2);
+      // refresh() is the network path → exactly one call.
+      expect(portfolioRepo.calls, 1);
     });
   });
 
@@ -733,6 +737,13 @@ class _FakePortfolioRepository implements PortfolioRepository {
   @override
   Future<PortfolioSnapshot> getSnapshot({required String baseCurrency}) async {
     calls += 1;
+    return snapshot.copyWith(baseCurrency: baseCurrency);
+  }
+
+  @override
+  Future<PortfolioSnapshot> getCachedSnapshot({
+    required String baseCurrency,
+  }) async {
     return snapshot.copyWith(baseCurrency: baseCurrency);
   }
 
