@@ -375,13 +375,16 @@ void main() {
 
       final snapshot = await repo.getSnapshot(baseCurrency: 'USD');
 
-      expect(snapshot.sourceHealth, hasLength(2));
-      expect(snapshot.sourceHealth[0].sourceId, 'ibkr');
-      expect(snapshot.sourceHealth[0].status, ConnectionStatus.ok);
-      expect(snapshot.sourceHealth[1].sourceId, 'c1');
-      expect(snapshot.sourceHealth[1].status, ConnectionStatus.error);
-      expect(snapshot.sourceHealth[1].code, 'credential_wrap_failed');
-      expect(snapshot.sourceHealth[1].message, 'Unable to prepare credentials');
+      // When every active e2e connection failed to produce a wrapped
+      // token, the repo short-circuits to the cache (no backend hit)
+      // and surfaces only the wrap errors — the test backend's mocked
+      // "ibkr ok" line is intentionally absent because we never sent
+      // the request.
+      expect(snapshot.sourceHealth, hasLength(1));
+      expect(snapshot.sourceHealth[0].sourceId, 'c1');
+      expect(snapshot.sourceHealth[0].status, ConnectionStatus.error);
+      expect(snapshot.sourceHealth[0].code, 'credential_wrap_failed');
+      expect(snapshot.sourceHealth[0].message, 'Unable to prepare credentials');
       await repo.dispose();
       await db.close();
     });

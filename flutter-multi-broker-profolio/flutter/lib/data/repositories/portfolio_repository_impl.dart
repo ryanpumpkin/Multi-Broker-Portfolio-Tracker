@@ -41,6 +41,38 @@ class PortfolioRepositoryImpl implements PortfolioRepository {
       final wrapped = await wrappedCredentialsBuilder.buildForConnections(
         activeConnections,
       );
+      // If we have e2e connections but no usable wrapped tokens (the
+      // credential key wasn't in memory yet), refuse to hit the backend
+      // — otherwise it returns source_health=down for every connection,
+      // overwriting whatever we had on screen. Return the cached
+      // snapshot instead, leaving the UI in its last good state.
+      final hasActiveE2e = activeConnections.any(
+        (c) =>
+            c.credentialMode == CredentialMode.e2e &&
+            c.status != ConnectionStatus.disabled &&
+            c.kind != ConnectionKind.manual,
+      );
+      if (hasActiveE2e && wrapped.tokensByConnection.isEmpty) {
+        final cached = await _buildSnapshotFromCache(baseCurrency);
+        // Attach the wrap errors to source_health so the UI can show
+        // "PIN required" instead of a confused empty state.
+        final wrapErrors = wrapped.errorsByConnection.entries
+            .map(
+              (e) => SourceHealth(
+                sourceId: e.key,
+                status: ConnectionStatus.error,
+                code: 'credential_wrap_failed',
+                message: e.value,
+              ),
+            )
+            .toList(growable: false);
+        return cached.copyWith(
+          sourceHealth: <SourceHealth>[
+            ...cached.sourceHealth,
+            ...wrapErrors,
+          ],
+        );
+      }
       final json = await backend.getPortfolioSnapshot(
         baseCurrency: baseCurrency,
         wrappedCredsByConnection: wrapped.tokensByConnection,
