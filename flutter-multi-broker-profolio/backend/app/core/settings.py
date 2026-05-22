@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 
+    # Futu RSA key for encrypted cross-network trade connections
+    futu_conn_key_path: str | None = None
+
     # Auth toggle for local/test environments
     auth_disabled: bool = False
 

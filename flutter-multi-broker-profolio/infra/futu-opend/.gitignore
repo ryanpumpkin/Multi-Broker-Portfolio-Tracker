@@ -1,0 +1,6 @@
+# The OpenD binary tarball is large (~200 MB), licensed to Futu, and
+# must be downloaded manually per machine. Never commit it.
+OpenD.tar
+OpenD.tar.gz
+OpenD_*/
+Futu_OpenD_*/

@@ -40,6 +40,9 @@ services:
       MBP_IB_GATEWAY_PORT: "5000"
       MBP_FUTU_OPEND_HOST: futu-opend
       MBP_FUTU_OPEND_PORT: "11111"
+      MBP_FUTU_CONN_KEY_PATH: /secrets/futu_conn_key.pem
+    volumes:
+      - ./infra/futu-opend/conn_key.pem:/secrets/futu_conn_key.pem:ro
     ports:
       - "8000:8000"
     networks:
@@ -80,22 +83,33 @@ services:
       - mbp-net
 
   # ── Futu OpenD sidecar ──────────────────────────────────────────────────────
-  # Image: ghcr.io/futu-sg/futunng-opend (official Futu OpenD Docker image).
-  # If this image is unavailable from the registry, pull it manually — see
-  # infra/README.md §Futu Sidecar.
+  # Custom image — built locally from Futu's official Linux OpenD binary.
+  # Before the first build you must download OpenD.tar.gz and place it at
+  # `infra/futu-opend/OpenD.tar.gz`. See `infra/futu-opend/README.md`.
   #
   # IMPORTANT: You must supply FUTU_OPEND_LOGIN_ACCOUNT and
-  # FUTU_OPEND_LOGIN_PASSWORD_MD5 in your .env file.  See infra/README.md.
+  # FUTU_OPEND_LOGIN_PASSWORD_MD5 in your .env file.
   futu-opend:
-    image: ghcr.io/futu-sg/futunng-opend:latest
+    build:
+      context: ./infra/futu-opend
+      dockerfile: Dockerfile
+    image: mbp-futu-opend:latest
+    # The FutuOpenD binary is x86_64-only. Force amd64 so the container
+    # runs under Rosetta on Apple-silicon Macs; on a native x86_64 host
+    # this is a no-op.
+    platform: linux/amd64
     restart: unless-stopped
     environment:
       FUTU_OPEND_LOGIN_ACCOUNT: "${FUTU_OPEND_LOGIN_ACCOUNT:-}"
       FUTU_OPEND_LOGIN_PASSWORD_MD5: "${FUTU_OPEND_LOGIN_PASSWORD_MD5:-}"
-      FUTU_OPEND_TRADE_RSA_FILE: "${FUTU_OPEND_TRADE_RSA_FILE:-}"
-    # Port 11111 is the OpenD API port — exposed only on mbp-net.
+    # 11111 — API port (used by the backend), only on mbp-net.
+    # 22222 — Telnet console for entering the SMS verify code on first
+    #         login. Published to localhost only so you can `telnet
+    #         localhost 22222` from your laptop / SSH session.
     expose:
       - "11111"
+    ports:
+      - "127.0.0.1:22222:22222"
     volumes:
       - futu-state:/opt/OpenD/data
     networks:

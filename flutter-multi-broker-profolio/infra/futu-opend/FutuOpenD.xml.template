@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<futu_opend>
+    <!-- Listen on all interfaces so the backend container can reach us
+         across the docker network. The image only exposes 11111 on the
+         private mbp-net bridge, never to the host. -->
+    <ip>0.0.0.0</ip>
+    <api_port>${FUTU_OPEND_API_PORT}</api_port>
+
+    <login_account>${FUTU_OPEND_LOGIN_ACCOUNT}</login_account>
+    <login_pwd_md5>${FUTU_OPEND_LOGIN_PASSWORD_MD5}</login_pwd_md5>
+
+    <lang>en</lang>
+    <log_level>${FUTU_OPEND_LOG_LEVEL}</log_level>
+    <push_proto_type>0</push_proto_type>
+
+    <!-- Telnet console for entering SMS verification codes on first
+         login from a new device. We bind 0.0.0.0 because the host
+         reaches the container across the docker network — never expose
+         this port to the public internet. -->
+    <telnet_ip>0.0.0.0</telnet_ip>
+    <telnet_port>22222</telnet_port>
+
+    <!-- RSA private key for encrypted cross-network trade connections.
+         Required when OpenD listens on 0.0.0.0 and clients connect from
+         a different network segment (e.g. Docker bridge). -->
+    <rsa_private_key>/opt/OpenD/conn_key.pem</rsa_private_key>
+</futu_opend>

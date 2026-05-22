@@ -154,6 +154,18 @@ class FutuOpenDClient:  # pragma: no cover - SDK-bound; exercised via real OpenD
             quote_ctx.close()
 
     def _trade_context(self) -> Any:
+        settings = get_settings()
+        if settings.futu_conn_key_path:
+            # The futu SDK registers the RSA private key globally via
+            # SysConfig.set_init_rsa_file() rather than as a constructor
+            # argument. Once set, constructing the context with
+            # is_encrypt=True is enough to encrypt trade-side calls.
+            self._sdk.SysConfig.set_init_rsa_file(settings.futu_conn_key_path)
+            return self._sdk.OpenSecTradeContext(
+                host=self._host,
+                port=self._port,
+                is_encrypt=True,
+            )
         return self._sdk.OpenSecTradeContext(host=self._host, port=self._port)
 
     def _trd_env(self) -> Any:

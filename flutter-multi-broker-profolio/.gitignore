@@ -1,4 +1,6 @@
 # Secrets — NEVER commit
+conn_key.pem
+infra/futu-opend/conn_key.pem
 *firebase-adminsdk*.json
 *service-account*.json
 *-credentials.json
