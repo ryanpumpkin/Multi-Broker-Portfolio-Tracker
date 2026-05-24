@@ -12,6 +12,7 @@ fi
 
 export FUTU_OPEND_API_PORT="${FUTU_OPEND_API_PORT:-11111}"
 export FUTU_OPEND_LOG_LEVEL="${FUTU_OPEND_LOG_LEVEL:-info}"
+export FUTU_OPEND_LISTEN_IP="${FUTU_OPEND_LISTEN_IP:-127.0.0.1}"
 
 # Template FutuOpenD.xml with credentials from env vars.
 envsubst < /opt/OpenD/FutuOpenD.xml.template > /opt/OpenD/FutuOpenD.xml

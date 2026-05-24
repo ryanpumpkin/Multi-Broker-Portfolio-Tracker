@@ -26,6 +26,11 @@ volumes:
 services:
 
   # ── FastAPI backend ─────────────────────────────────────────────────────────
+  # backend shares futu-opend's network namespace so OpenD can listen on
+  # 127.0.0.1 (no encryption required for "local" trade calls). The
+  # backend reaches OpenD via localhost:11111. Side effect: backend has
+  # no networks/ports of its own — all port publishing for the API
+  # (8000) is done on the futu-opend service below.
   backend:
     build:
       context: ./backend
@@ -38,18 +43,12 @@ services:
     environment:
       MBP_IB_GATEWAY_HOST: ibkr-gateway
       MBP_IB_GATEWAY_PORT: "5000"
-      MBP_FUTU_OPEND_HOST: futu-opend
+      MBP_FUTU_OPEND_HOST: 127.0.0.1
       MBP_FUTU_OPEND_PORT: "11111"
-      MBP_FUTU_CONN_KEY_PATH: /secrets/futu_conn_key.pem
     volumes:
       - ./infra/futu-opend/conn_key.pem:/secrets/futu_conn_key.pem:ro
-    ports:
-      - "8000:8000"
-    networks:
-      - mbp-net
+    network_mode: "service:futu-opend"
     depends_on:
-      ibkr-gateway:
-        condition: service_started
       futu-opend:
         condition: service_started
     healthcheck:
@@ -102,13 +101,16 @@ services:
     environment:
       FUTU_OPEND_LOGIN_ACCOUNT: "${FUTU_OPEND_LOGIN_ACCOUNT:-}"
       FUTU_OPEND_LOGIN_PASSWORD_MD5: "${FUTU_OPEND_LOGIN_PASSWORD_MD5:-}"
-    # 11111 — API port (used by the backend), only on mbp-net.
+      # Bind to 127.0.0.1 so Futu treats backend calls (which now share
+      # this network namespace) as local — no encryption required.
+      FUTU_OPEND_LISTEN_IP: "127.0.0.1"
+    # 11111 — API port (used by the backend on the shared net).
     # 22222 — Telnet console for entering the SMS verify code on first
-    #         login. Published to localhost only so you can `telnet
-    #         localhost 22222` from your laptop / SSH session.
-    expose:
-      - "11111"
+    #         login.
+    # 8000  — published on behalf of the backend, which shares this
+    #         namespace via `network_mode: service:futu-opend`.
     ports:
+      - "8000:8000"
       - "127.0.0.1:22222:22222"
     volumes:
       - futu-state:/opt/OpenD/data
