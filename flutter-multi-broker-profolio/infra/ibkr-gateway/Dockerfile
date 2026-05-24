@@ -44,13 +44,24 @@ RUN apt-get update \
 
 WORKDIR /tmp
 
-# Install IB Gateway in unattended mode. The installer creates a
-# version-named subdirectory (e.g. /root/Jts/1019/) which IBC's
-# gatewaystart.sh expects to find under TWS_PATH=/root/Jts.
+# Install IB Gateway in unattended mode. The installer drops files
+# directly under the -dir path (no version subdir), so we install to
+# a temp location, parse the version out of "IB Gateway X.YZ.desktop",
+# then move the install into /root/Jts/<version> which is what IBC's
+# gatewaystart.sh expects.
 COPY ibgateway.sh /tmp/ibgateway.sh
 RUN chmod +x /tmp/ibgateway.sh \
- && /tmp/ibgateway.sh -q -dir /root/Jts \
+ && /tmp/ibgateway.sh -q -dir /root/install \
+ && VRSN=$(ls /root/install | sed -n 's/^IB Gateway \([0-9]*\)\.\([0-9]*\)\.desktop$/\1\2/p' | head -1) \
+ && if [ -z "$VRSN" ]; then \
+        echo "Could not parse IB Gateway version from install dir" >&2; \
+        ls /root/install >&2; \
+        exit 1; \
+    fi \
+ && mkdir -p /root/Jts \
+ && mv /root/install "/root/Jts/${VRSN}" \
  && rm /tmp/ibgateway.sh \
+ && echo "Installed IB Gateway version ${VRSN}" \
  && ls /root/Jts
 
 # Install IBC.
