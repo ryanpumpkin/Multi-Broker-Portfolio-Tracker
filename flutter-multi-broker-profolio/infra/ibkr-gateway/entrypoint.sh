@@ -14,29 +14,28 @@ export IBKR_API_PORT="${IBKR_API_PORT:-4001}"
 envsubst < /root/ibc/config.ini.template > /root/ibc/config.ini
 chmod 600 /root/ibc/config.ini
 
-# Resolve the IB Gateway install dir. The installer creates a
-# `data/` sibling we have to skip; the real one is the numeric
-# version directory.
-TWS_VERSION=$(ls /root/Jts/ibgateway | grep -E '^[0-9]+' | head -1)
+# Resolve the IB Gateway version. The installer creates a numeric
+# directory like /root/Jts/1019/ — we pass that version number to
+# IBC's gatewaystart.sh via the TWS_MAJOR_VRSN env var.
+TWS_VERSION=$(ls /root/Jts | grep -E '^[0-9]+$' | head -1)
 if [[ -z "$TWS_VERSION" ]]; then
-  echo "IB Gateway install not found under /root/Jts/ibgateway" >&2
-  ls /root/Jts/ibgateway >&2
+  echo "IB Gateway install not found under /root/Jts" >&2
+  ls /root/Jts >&2
   exit 1
 fi
 echo "Using IB Gateway version: $TWS_VERSION"
+export TWS_MAJOR_VRSN="$TWS_VERSION"
+export TWS_PATH=/root/Jts
+export IBC_PATH=/opt/ibc
+export IBC_INI=/root/ibc/config.ini
+export TWS_SETTINGS_PATH=/root/Jts/settings
+export LOG_PATH=/root/ibc/logs
+mkdir -p "$LOG_PATH" "$TWS_SETTINGS_PATH"
 
 # Start virtual display so the Swing GUI has somewhere to draw.
 Xvfb :0 -screen 0 1024x768x24 -ac +extension GLX +render -noreset &
 sleep 2
 
-# Hand off to IBC's gatewaystart.sh — it sets up the classpath and
-# environment IBC expects, then runs scripts/ibcstart.sh under the
-# hood. Configuration is read from the templated config.ini.
-exec /opt/ibc/gatewaystart.sh \
-  -inline \
-  --gateway \
-  --tws-path=/root/Jts/ibgateway \
-  --ibc-path=/opt/ibc \
-  --ibc-ini=/root/ibc/config.ini \
-  --tws-settings-path=/root/Jts/settings \
-  --mode="$IBKR_TRADING_MODE"
+# Hand off to IBC's gatewaystart.sh. `-inline` keeps logs on stdout
+# so docker logs captures everything.
+exec /opt/ibc/gatewaystart.sh -inline

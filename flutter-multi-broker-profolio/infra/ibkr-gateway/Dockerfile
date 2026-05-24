@@ -18,7 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \
     DISPLAY=:0 \
     IBC_DIR=/opt/ibc \
-    TWS_INSTALL_DIR=/root/Jts/ibgateway \
+    TWS_INSTALL_DIR=/root/Jts \
     IBC_INI=/root/ibc/config.ini
 
 # Runtime deps:
@@ -44,14 +44,14 @@ RUN apt-get update \
 
 WORKDIR /tmp
 
-# Install IB Gateway in unattended mode. The installer is a self-extracting
-# shell script that drops into /root/Jts/ibgateway/<version>/. The version
-# number changes between releases — we resolve it at runtime via a glob.
+# Install IB Gateway in unattended mode. The installer creates a
+# version-named subdirectory (e.g. /root/Jts/1019/) which IBC's
+# gatewaystart.sh expects to find under TWS_PATH=/root/Jts.
 COPY ibgateway.sh /tmp/ibgateway.sh
 RUN chmod +x /tmp/ibgateway.sh \
- && /tmp/ibgateway.sh -q -dir /root/Jts/ibgateway \
+ && /tmp/ibgateway.sh -q -dir /root/Jts \
  && rm /tmp/ibgateway.sh \
- && ls /root/Jts/ibgateway
+ && ls /root/Jts
 
 # Install IBC.
 COPY IBC.zip /tmp/IBC.zip
