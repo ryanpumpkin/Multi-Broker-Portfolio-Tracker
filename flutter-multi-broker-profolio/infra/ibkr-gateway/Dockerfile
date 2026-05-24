@@ -57,7 +57,7 @@ RUN chmod +x /tmp/ibgateway.sh \
 COPY IBC.zip /tmp/IBC.zip
 RUN mkdir -p /opt/ibc \
  && unzip -q /tmp/IBC.zip -d /opt/ibc \
- && chmod +x /opt/ibc/*.sh \
+ && find /opt/ibc -name '*.sh' -exec chmod +x {} + \
  && rm /tmp/IBC.zip
 
 COPY config.ini.template /root/ibc/config.ini.template
