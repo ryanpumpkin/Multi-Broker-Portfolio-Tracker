@@ -23,8 +23,11 @@
     <telnet_ip>0.0.0.0</telnet_ip>
     <telnet_port>22222</telnet_port>
 
-    <!-- RSA private key for encrypted cross-network trade connections.
-         Required when OpenD listens on 0.0.0.0 and clients connect from
-         a different network segment (e.g. Docker bridge). -->
-    <rsa_private_key>/opt/OpenD/conn_key.pem</rsa_private_key>
+    <!-- NOTE: <rsa_private_key> is intentionally omitted. Including it
+         flips "API RSA Enabled: Yes" inside OpenD, which then forces
+         encrypted handshakes on every connection — including localhost.
+         The encrypted handshake itself is unstable (see commit history),
+         so we rely on listening on 127.0.0.1 + shared network namespace
+         for security instead. To re-enable RSA, add the tag back AND
+         change FUTU_OPEND_LISTEN_IP to 0.0.0.0. -->
 </futu_opend>
