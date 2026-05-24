@@ -92,6 +92,9 @@ services:
       # If another IB session is logged in elsewhere (phone, desktop),
       # take over from it instead of waiting for human intervention.
       EXISTING_SESSION_DETECTED_ACTION: "primary"
+      # Temporary VNC for debugging which dialog is blocking login.
+      # Set to empty string to disable VNC again.
+      VNC_SERVER_PASSWORD: "ibkrdebug"
       # Auto-accept the API "Allow incoming connections?" dialog —
       # without this, Gateway sits with the dialog open and the
       # API socket never binds, so port 4001 has no listener.
@@ -109,6 +112,10 @@ services:
     expose:
       - "4001"
       - "4002"
+    # Temporary VNC publish for debugging the GUI login. Comment this
+    # block out once IBC is correctly auto-dismissing all dialogs.
+    ports:
+      - "127.0.0.1:5901:5900"
     volumes:
       - ibkr-state:/root/Jts/settings
     networks:
