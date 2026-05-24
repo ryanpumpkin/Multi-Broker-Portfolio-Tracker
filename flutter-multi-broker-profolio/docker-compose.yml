@@ -89,6 +89,9 @@ services:
       BYPASS_WARNING: "yes"
       AUTO_RESTART_TIME: "11:59 PM"
       TIME_ZONE: "Etc/UTC"
+      # If another IB session is logged in elsewhere (phone, desktop),
+      # take over from it instead of waiting for human intervention.
+      EXISTING_SESSION_DETECTED_ACTION: "primary"
     # API socket exposed only on mbp-net (peer containers reach via
     # `ibkr-gateway` hostname). Not published to the host.
     expose:
