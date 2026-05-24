@@ -42,7 +42,8 @@ services:
       - .env
     environment:
       MBP_IB_GATEWAY_HOST: ibkr-gateway
-      MBP_IB_GATEWAY_PORT: "5000"
+      # 4001 = live, 4002 = paper. ib_insync default ports.
+      MBP_IB_GATEWAY_PORT: "${IBKR_API_PORT:-4001}"
       MBP_FUTU_OPEND_HOST: 127.0.0.1
       MBP_FUTU_OPEND_PORT: "11111"
     volumes:
@@ -64,24 +65,32 @@ services:
       retries: 3
 
   # ── IB Gateway sidecar ──────────────────────────────────────────────────────
-  # Image: ghcr.io/unusualwhale/ibkr-cpapi (open-source IB Client Portal
-  # Gateway wrapper).  Credentials are passed via environment variables;
-  # session state is persisted in the ibkr-state volume.
+  # Custom image — built locally from IBKR's official Linux Java Gateway
+  # installer + IBC (open-source GUI automation). See
+  # infra/ibkr-gateway/README.md for one-time downloads.
   #
-  # IMPORTANT: You must supply IBKR_USERNAME, IBKR_PASSWORD, and
-  # IBKR_TRADING_MODE (paper|live) in your .env file.  See infra/README.md.
+  # IMPORTANT: Supply IBKR_USERNAME, IBKR_PASSWORD, and
+  # IBKR_TRADING_MODE (paper|live) in your .env file.
   ibkr-gateway:
-    image: ghcr.io/unusualwhale/ibkr-cpapi:latest
+    build:
+      context: ./infra/ibkr-gateway
+      dockerfile: Dockerfile
+    image: mbp-ibkr-gateway:latest
+    container_name: mbp-ibkr-gateway
     restart: unless-stopped
     environment:
       IBKR_USERNAME: "${IBKR_USERNAME:-}"
       IBKR_PASSWORD: "${IBKR_PASSWORD:-}"
       IBKR_TRADING_MODE: "${IBKR_TRADING_MODE:-paper}"
-    # Port 5000 is the Client Portal REST gateway — exposed only on mbp-net.
+      # 4001 = live, 4002 = paper. ib_insync defaults to these.
+      IBKR_API_PORT: "${IBKR_API_PORT:-4001}"
+    # API socket exposed only on mbp-net (peer containers reach via
+    # `ibkr-gateway` hostname). Not published to the host.
     expose:
-      - "5000"
+      - "4001"
+      - "4002"
     volumes:
-      - ibkr-state:/root/ibkr
+      - ibkr-state:/root/Jts/settings
     networks:
       - mbp-net
 

@@ -1,0 +1,3 @@
+# Large vendor binaries downloaded manually per machine. Never commit.
+ibgateway.sh
+IBC.zip
