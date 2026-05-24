@@ -74,7 +74,7 @@ RUN mkdir -p /opt/ibc \
  # clobber any inherited env vars (e.g. TWS_MAJOR_VRSN=1019,
  # TWSUSERID=, TRADING_MODE=, TWS_SETTINGS_PATH=...). Comment each
  # of those lines out so our entrypoint's exported values survive.
- && sed -i -E 's|^(TWS_MAJOR_VRSN|IBC_INI|TRADING_MODE|IBC_PATH|TWS_PATH|TWS_SETTINGS_PATH|LOG_PATH|TWSUSERID|TWSPASSWORD|FIXUSERID|FIXPASSWORD|JAVA_PATH|TWOFA_TIMEOUT_ACTION)=|# patched-out: \1=|' /opt/ibc/gatewaystart.sh
+ && sed -i -E 's@^(TWS_MAJOR_VRSN|IBC_INI|TRADING_MODE|IBC_PATH|TWS_PATH|TWS_SETTINGS_PATH|LOG_PATH|TWSUSERID|TWSPASSWORD|FIXUSERID|FIXPASSWORD|JAVA_PATH|TWOFA_TIMEOUT_ACTION)=@# patched-out: \1=@' /opt/ibc/gatewaystart.sh
 
 COPY config.ini.template /root/ibc/config.ini.template
 COPY entrypoint.sh /entrypoint.sh
