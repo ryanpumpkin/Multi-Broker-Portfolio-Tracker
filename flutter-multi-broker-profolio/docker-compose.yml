@@ -115,7 +115,7 @@ services:
     # Temporary VNC publish for debugging the GUI login. Comment this
     # block out once IBC is correctly auto-dismissing all dialogs.
     ports:
-      - "127.0.0.1:5901:5900"
+      - "127.0.0.1:25901:5900"
     volumes:
       - ibkr-state:/root/Jts/settings
     networks:
