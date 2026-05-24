@@ -92,6 +92,18 @@ services:
       # If another IB session is logged in elsewhere (phone, desktop),
       # take over from it instead of waiting for human intervention.
       EXISTING_SESSION_DETECTED_ACTION: "primary"
+      # Auto-accept the API "Allow incoming connections?" dialog —
+      # without this, Gateway sits with the dialog open and the
+      # API socket never binds, so port 4001 has no listener.
+      TWS_ACCEPT_INCOMING: "accept"
+      ALLOW_BLIND_TRADING: "no"
+      SAVE_TWS_SETTINGS: ""
+      TWS_COLD_RESTART: ""
+      AUTO_LOGOFF_TIME: ""
+      TWOFA_DEVICE: ""
+      TWOFA_EXIT_INTERVAL: ""
+      RELOGIN_AFTER_TWOFA_TIMEOUT: ""
+      TWS_MASTER_CLIENT_ID: ""
     # API socket exposed only on mbp-net (peer containers reach via
     # `ibkr-gateway` hostname). Not published to the host.
     expose:
