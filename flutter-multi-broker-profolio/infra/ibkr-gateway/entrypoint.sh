@@ -38,6 +38,9 @@ export TWSUSERID="$IBKR_USERNAME"
 export TWSPASSWORD="$IBKR_PASSWORD"
 mkdir -p "$LOG_PATH" "$TWS_SETTINGS_PATH"
 
+# Clean stale Xvfb lock from a previous container restart.
+rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
+
 # Start virtual display so the Swing GUI has somewhere to draw.
 Xvfb :0 -screen 0 1024x768x24 -ac +extension GLX +render -noreset &
 sleep 2

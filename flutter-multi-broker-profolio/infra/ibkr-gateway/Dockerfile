@@ -69,7 +69,12 @@ COPY IBC.zip /tmp/IBC.zip
 RUN mkdir -p /opt/ibc \
  && unzip -q /tmp/IBC.zip -d /opt/ibc \
  && find /opt/ibc -name '*.sh' -exec chmod +x {} + \
- && rm /tmp/IBC.zip
+ && rm /tmp/IBC.zip \
+ # gatewaystart.sh has `TWS_MAJOR_VRSN=1019` near the top which
+ # clobbers any inherited env. Comment that line out so our
+ # entrypoint's exported value takes effect.
+ && sed -i 's|^TWS_MAJOR_VRSN=|# patched out: TWS_MAJOR_VRSN=|' /opt/ibc/gatewaystart.sh \
+ && grep -n TWS_MAJOR_VRSN /opt/ibc/gatewaystart.sh | head -3
 
 COPY config.ini.template /root/ibc/config.ini.template
 COPY entrypoint.sh /entrypoint.sh
