@@ -65,9 +65,10 @@ services:
       retries: 3
 
   # ── IB Gateway sidecar ──────────────────────────────────────────────────────
-  # Custom image — built locally from IBKR's official Linux Java Gateway
-  # installer + IBC (open-source GUI automation). See
-  # infra/ibkr-gateway/README.md for one-time downloads.
+  # Custom image — adapted from gnzsnz/ib-gateway-docker (Apache-2.0).
+  # No manual downloads needed; the Dockerfile fetches a SHA256-verified
+  # archive of the offline IB Gateway installer at build time.
+  # See infra/ibkr-gateway/README.md.
   #
   # IMPORTANT: Supply IBKR_USERNAME, IBKR_PASSWORD, and
   # IBKR_TRADING_MODE (paper|live) in your .env file.
@@ -79,11 +80,15 @@ services:
     container_name: mbp-ibkr-gateway
     restart: unless-stopped
     environment:
-      IBKR_USERNAME: "${IBKR_USERNAME:-}"
-      IBKR_PASSWORD: "${IBKR_PASSWORD:-}"
-      IBKR_TRADING_MODE: "${IBKR_TRADING_MODE:-paper}"
-      # 4001 = live, 4002 = paper. ib_insync defaults to these.
-      IBKR_API_PORT: "${IBKR_API_PORT:-4001}"
+      # gnzsnz scripts read these env var names:
+      TWS_USERID: "${IBKR_USERNAME:-}"
+      TWS_PASSWORD: "${IBKR_PASSWORD:-}"
+      TRADING_MODE: "${IBKR_TRADING_MODE:-paper}"
+      READ_ONLY_API: "yes"
+      TWOFA_TIMEOUT_ACTION: "exit"
+      BYPASS_WARNING: "yes"
+      AUTO_RESTART_TIME: "11:59 PM"
+      TIME_ZONE: "Etc/UTC"
     # API socket exposed only on mbp-net (peer containers reach via
     # `ibkr-gateway` hostname). Not published to the host.
     expose:
