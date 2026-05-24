@@ -30,6 +30,12 @@ export IBC_PATH=/opt/ibc
 export IBC_INI=/root/ibc/config.ini
 export TWS_SETTINGS_PATH=/root/Jts/settings
 export LOG_PATH=/root/ibc/logs
+# IBC's launcher reads TRADING_MODE (not IBKR_TRADING_MODE). Map it.
+export TRADING_MODE="$IBKR_TRADING_MODE"
+# Also pass user/password directly — belt-and-suspenders with the
+# templated config.ini values.
+export TWSUSERID="$IBKR_USERNAME"
+export TWSPASSWORD="$IBKR_PASSWORD"
 mkdir -p "$LOG_PATH" "$TWS_SETTINGS_PATH"
 
 # Start virtual display so the Swing GUI has somewhere to draw.
