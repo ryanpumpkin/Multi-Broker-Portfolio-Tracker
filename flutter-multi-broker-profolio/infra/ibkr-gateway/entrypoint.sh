@@ -25,7 +25,7 @@ if [[ -z "$TWS_VERSION" ]]; then
 fi
 echo "Using IB Gateway version: $TWS_VERSION"
 export TWS_MAJOR_VRSN="$TWS_VERSION"
-export TWS_PATH=/root/Jts
+export TWS_PATH=/root/Jts/${TWS_VERSION}
 export IBC_PATH=/opt/ibc
 export IBC_INI=/root/ibc/config.ini
 export TWS_SETTINGS_PATH=/root/Jts/settings
