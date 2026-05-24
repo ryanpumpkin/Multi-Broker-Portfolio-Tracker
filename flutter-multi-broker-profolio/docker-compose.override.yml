@@ -40,8 +40,9 @@ services:
       # Skip real broker connections in dev — set adapters to disabled mode.
       IBKR_ADAPTER: disabled
       FUTU_ADAPTER: disabled
-    ports:
-      - "8000:8000"
+    # No `ports:` here — backend uses `network_mode: service:futu-opend`,
+    # which makes its own port publishing illegal. Port 8000 is published
+    # by the futu-opend service on behalf of the shared network namespace.
 
   # Sidecars still start so the compose graph is valid, but credentials are
   # blank — they will fail to connect to real IBKR/Futu endpoints, which is
