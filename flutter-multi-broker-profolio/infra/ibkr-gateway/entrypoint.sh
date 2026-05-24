@@ -30,12 +30,17 @@ export IBC_PATH=/opt/ibc
 export IBC_INI=/root/ibc/config.ini
 export TWS_SETTINGS_PATH=/root/Jts/settings
 export LOG_PATH=/root/ibc/logs
+export TWOFA_TIMEOUT_ACTION=exit
 # IBC's launcher reads TRADING_MODE (not IBKR_TRADING_MODE). Map it.
 export TRADING_MODE="$IBKR_TRADING_MODE"
-# Also pass user/password directly — belt-and-suspenders with the
-# templated config.ini values.
+# IBC reads TWSUSERID/TWSPASSWORD env vars directly (skipping the
+# templated config.ini values for this).
 export TWSUSERID="$IBKR_USERNAME"
 export TWSPASSWORD="$IBKR_PASSWORD"
+# Empty FIX defaults so the patched-out script doesn't have unset vars.
+export FIXUSERID=""
+export FIXPASSWORD=""
+export JAVA_PATH=""
 mkdir -p "$LOG_PATH" "$TWS_SETTINGS_PATH"
 
 # Clean stale Xvfb lock from a previous container restart.
