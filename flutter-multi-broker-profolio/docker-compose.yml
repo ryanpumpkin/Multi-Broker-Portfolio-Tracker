@@ -47,7 +47,11 @@ services:
       MBP_FUTU_OPEND_PORT: "11111"
     volumes:
       - ./infra/futu-opend/conn_key.pem:/secrets/futu_conn_key.pem:ro
-    network_mode: "service:futu-opend"
+    # network_mode: service:X is not resolved by older docker-compose
+    # (e.g. Synology v2.9). Use the explicit container name instead.
+    # The container_name on futu-opend below pins this to a stable
+    # value across recreations.
+    network_mode: "container:mbp-futu-opend"
     depends_on:
       futu-opend:
         condition: service_started
@@ -93,6 +97,9 @@ services:
       context: ./infra/futu-opend
       dockerfile: Dockerfile
     image: mbp-futu-opend:latest
+    # Pinned name so the backend's network_mode: container:mbp-futu-opend
+    # resolves the same way across compose versions.
+    container_name: mbp-futu-opend
     # The FutuOpenD binary is x86_64-only. Force amd64 so the container
     # runs under Rosetta on Apple-silicon Macs; on a native x86_64 host
     # this is a no-op.
