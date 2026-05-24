@@ -1,120 +1,81 @@
-# rnpksync — YouTube Sync Room
+# Multi-Broker Portfolio Tracker
 
-A real-time room-based "watch-together" app for YouTube. Create a room, share the URL, and everyone's player stays in sync. Built with Express + Socket.IO.
+> A self-hosted portfolio dashboard that aggregates positions, balances,
+> transactions, and live quotes across **LongBridge**, **Interactive
+> Brokers**, **Futu/moomoo**, and **Binance** — with end-to-end
+> encrypted broker credentials, Firebase auth, and a Flutter UI.
 
-![docker pulls](https://img.shields.io/docker/pulls/rnpk/rnpksync)
+[![status](https://img.shields.io/badge/status-self--hosted-blue)](#)
+[![brokers](https://img.shields.io/badge/brokers-4-green)](#supported-brokers)
+[![license](https://img.shields.io/badge/license-MIT-lightgrey)](#)
 
-## Features
+📂 **The full project lives in [`flutter-multi-broker-profolio/`](./flutter-multi-broker-profolio/)** —
+including the Flutter app, FastAPI backend, broker SDK adapters, and
+Docker deployment recipes.
 
-- 🎬 Synced YouTube playback (play / pause / seek) across all viewers
-- 📋 Shared playlist — anyone can paste a video or **playlist** URL and it expands into individual tracks (including titles, including CJK / unicode)
-- 🎵 Supports `youtube.com`, `youtu.be`, `music.youtube.com`, `/shorts/`, `/live/` URLs
-- 👑 **Multiple leaders** — promote/demote anyone; any leader can control playback, anyone else watches in sync
-- 🔀 Loop / Shuffle play modes
-- 🗑️ Auto-delete on end (turn the playlist into a one-time queue)
-- ↕️ Drag-and-drop reordering, plus ▲▼ buttons
-- ⌨️ Keyboard shortcuts: `Space` play/pause, `←/→` ±5 s seek, `N` next
-- 🔊 Volume slider + mute, time display, all persisted to `localStorage`
-- 🧑 Custom display names (or auto-assigned fruit names like Apple, Banana, …)
-- 📜 Activity log — see exactly who played / added / promoted / cleared what
-- 💾 Playlists survive server restarts (periodic snapshot to `data/rooms.json`)
-- 🩺 `GET /healthz` for orchestrator liveness probes
-- 📱 Responsive layout — sidebar stacks below the video on mobile
+---
 
-## Quick start
+## What it does
 
-### Docker (recommended)
+- **One dashboard, four brokers.** See your total P&L, allocation,
+  and per-symbol positions in your base currency, no matter where the
+  cash actually sits.
+- **End-to-end encrypted credentials.** Your broker API keys are
+  encrypted on-device with a PIN-derived key (Argon2id + AES-GCM). The
+  backend never sees plaintext — it relays opaque tokens to short-lived
+  broker SDK calls.
+- **Self-hosted.** Runs on your laptop, a NAS, or a small VPS via
+  `docker-compose`. Your data stays with you.
+- **Live quotes.** Authenticated WebSocket stream pushes price ticks
+  to the Positions screen.
 
-```bash
-docker run -d \
-  -p 3000:3000 \
-  -v rnpksync-data:/data \
-  --name rnpksync \
-  rnpk/rnpksync:latest
-```
+## Supported brokers
 
-Open <http://localhost:3000>.
-
-### docker-compose
-
-```bash
-git clone https://github.com/ryanpumpkin/rnpksync.git
-cd rnpksync
-docker compose up -d
-```
-
-### Locally with Node
-
-```bash
-git clone https://github.com/ryanpumpkin/rnpksync.git
-cd rnpksync
-npm install
-npm start
-```
-
-Requires Node 14+.
-
-## How leaders work
-
-- The first user to join a room becomes a leader.
-- Any leader can promote any other user (multi-leader is allowed).
-- Any leader controls playback. Non-leaders see the same state but can only add to the playlist.
-- If the only leader disconnects, the next remaining user is auto-promoted.
-
-## Environment variables
-
-| Var | Default | Effect |
+| Broker | Status | Notes |
 |---|---|---|
-| `PORT` | `3000` | HTTP port |
-| `LOG_LEVEL` | `info` | pino log level (`debug` for verbose, `warn` for quiet) |
-| `DATA_DIR` | `./data` | Where `rooms.json` snapshot is written |
+| LongBridge / Longport | ✅ live | Stocks (HK / US / CN), FX-converted to base currency |
+| Interactive Brokers (live) | ✅ live | Via IB Gateway + IBC sidecar (built from Apache-2.0 [gnzsnz/ib-gateway-docker](https://github.com/gnzsnz/ib-gateway-docker)) |
+| Futu / moomoo | ✅ live | Via OpenD sidecar; backend shares network namespace for local-mode auth |
+| Binance (spot) | ✅ live | Read-only API key; trades + balances |
+| Manual holdings | ✅ live | For anything none of the above tracks (real estate, cash, etc.) |
 
-## Room lifecycle
-
-- Created on first visit to `/` → POST `/create-room`.
-- Expires **1 hour after creation** — but if anyone is in the room, the expiry is bumped forward on every join and every 5 min.
-- **Auto-closes 5 min after the last user leaves** (cancelled if anyone rejoins in that window).
-- Active rooms are snapshotted to disk every 30 s and on `SIGINT`/`SIGTERM`. Restoring on restart restores the playlist + settings; user names / leaders are not preserved (socket IDs don't survive).
-
-## Known limitations
-
-- **Private YouTube Music playlists** cannot be expanded without OAuth — make the playlist Public on YT Music (⋯ → Privacy → Public) and the URL will work.
-- **YouTube rate-limit**: pasting many playlist URLs in quick succession can trigger throttling. There's a per-socket rate-limit (5 adds / 15 s).
-
-## File layout
+## Architecture (TL;DR)
 
 ```
-index.js                 — entry: express + socket.io setup, signal handlers
-lib/
-  youtube.js             — URL parsing, HTML scraping
-  rooms.js               — room state, persistence, cleanup
-  socketHandlers.js      — every socket event handler
-views/
-  landing.html, room.html
-public/
-  landing.{css,js}, room.{css,js}
-data/rooms.json          — playlist/expiry snapshot
+┌──────────────┐    HTTPS + JWT     ┌──────────────┐    SDK     ┌─────────────┐
+│ Flutter app  │  ──────────────▶   │ FastAPI BE   │ ────────▶  │ Broker APIs │
+│ (web / iOS / │                    │ (Python)     │            │             │
+│  Android)    │  ◀── source_health ┤  + aggregator│ ◀─ data ── │ LB IBKR     │
+└──────────────┘     + positions    └──────────────┘            │ Futu Binance│
+                                            │                   └─────────────┘
+                                            │
+                                    ┌───────▼───────┐
+                                    │ Firebase Auth │
+                                    │ + Firestore   │
+                                    │ (encrypted    │
+                                    │  cred blobs)  │
+                                    └───────────────┘
 ```
 
-See [`CLAUDE.md`](./CLAUDE.md) for deeper architecture notes.
+Full architecture notes:
+[`flutter-multi-broker-profolio/doc/ARCHITECTURE_NOTES.md`](./flutter-multi-broker-profolio/doc/ARCHITECTURE_NOTES.md).
 
-## Healthcheck
+## Get started
 
-```bash
-curl http://localhost:3000/healthz
-# {"ok":true,"uptime":42,"rooms":3,"connections":7}
-```
+| I want to… | Read |
+|---|---|
+| Run it locally for development | [`flutter-multi-broker-profolio/doc/RUNBOOK.md`](./flutter-multi-broker-profolio/doc/RUNBOOK.md) |
+| Deploy to a Synology / Linux server | [`flutter-multi-broker-profolio/README.md`](./flutter-multi-broker-profolio/README.md) |
+| Add a broker | [`flutter-multi-broker-profolio/doc/BROKER_INTEGRATION_DETAILS.md`](./flutter-multi-broker-profolio/doc/BROKER_INTEGRATION_DETAILS.md) |
+| Understand the design decisions | [`flutter-multi-broker-profolio/doc/ARCHITECTURE_NOTES.md`](./flutter-multi-broker-profolio/doc/ARCHITECTURE_NOTES.md) |
+| Build the IBKR sidecar | [`flutter-multi-broker-profolio/infra/ibkr-gateway/README.md`](./flutter-multi-broker-profolio/infra/ibkr-gateway/README.md) |
+| Build the Futu sidecar | [`flutter-multi-broker-profolio/infra/futu-opend/README.md`](./flutter-multi-broker-profolio/infra/futu-opend/README.md) |
 
-The Dockerfile ships with `HEALTHCHECK` that probes this endpoint every 30 seconds.
+---
 
-## Logging
+## Other project in this repo
 
-Structured JSON on stdout via [pino](https://github.com/pinojs/pino). State changes are logged at `info`; per-tick playback sync chatter is silent. Pipe through `pino-pretty` in development:
-
-```bash
-npm start | npx pino-pretty
-```
-
-## License
-
-MIT (unless specified otherwise — feel free to adjust).
+This repository also hosts **rnpksync** — a real-time YouTube
+watch-together app (Express + Socket.IO). Unrelated to the portfolio
+tracker; lives at the repo root for historical reasons. See
+[`README-rnpksync.md`](./README-rnpksync.md) for details.
