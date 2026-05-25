@@ -1,7 +1,7 @@
 # Multi-Broker Portfolio Tracker — Final Build Report
 
-**Generated:** 2026-05-19  
-**Status:** Post-MVP implementation complete for items 1-4; item 5 (final-report) in progress in this slice.
+**Generated:** 2026-05-19  **Updated:** 2026-05-25  
+**Status:** All orchestrated modules complete. Post-orchestrator infrastructure hardening landed on main (see Theme F below).
 
 ---
 
@@ -124,6 +124,51 @@ Range: `dcc8a54..88d4604` on `main` (52 commits), grouped by theme.
 - `b60ca13` feat(post-mvp/broker-integration-binance): complete binance trades/balances flow and env-gated integration test
 - `55b82ea` feat(post-mvp/transactions-history): wire 90d historical transactions across brokers
 - `88d4604` feat(post-mvp/live-quote-streaming): wire authenticated quote WS with broker streaming and live UI prices
+
+---
+
+## Theme F — Post-orchestrator infrastructure hardening (manual, 2026-05-19 onwards)
+
+After the orchestrator finished, 29 additional commits landed on `main` covering runtime fixes
+and sidecar automation. Range: `b9f9b8a..7641187`.
+
+### F1 — Auth + app-lock fixes
+- `8f0a9f2` fix(app-lock): reset lock state on sign-out and await PIN-derived key
+- `4fef6d1` fix(auth): submit on Enter in sign-in/up/reset screens
+- `ec3b0b3` fix(app-lock): scope PIN+salt per user and stop wiping storage on sign-out
+
+### F2 — Portfolio cache + PIN gate
+- `a893308` fix(portfolio): cache-first build + explicit PIN-gated refresh
+- `6587715` fix(dashboard): route pull-to-refresh through the PIN gate
+- `f48a9f0` fix(portfolio): never overwrite cached snapshot with a creds-less fetch
+
+### F3 — Futu OpenD self-built Docker image
+- `035ff7a` feat(infra/futu): self-built OpenD Docker image with RSA encryption scaffold
+- `457b1dc` feat(infra/futu): make backend share OpenD network so we can skip RSA
+- `3b9d030` fix(compose): drop backend port publish in override (conflicts with shared netns)
+- `0f3dc3e` fix(compose): use container:NAME for backend's network_mode (older compose compat)
+- `a74e097` fix(futu): drop <rsa_private_key> tag — forces encryption on all connections
+- `ddd3880` chore(backend): bump futu-api to ~=10.6.0 to match OpenD 10.6.6608
+
+### F4 — IBKR self-built gateway image with IBC headless automation
+- `e2b1995` feat(infra/ibkr): self-built IB Gateway image with IBC headless automation
+- `dbc08e1` fix(ibkr): chmod IBC scripts recursively, use gatewaystart.sh, skip data/ dir
+- `ad29251` fix(ibkr): install to /root/Jts (not /root/Jts/ibgateway), drive IBC via env vars
+- `33eca6b` fix(ibkr): export TRADING_MODE / TWSUSERID / TWSPASSWORD for IBC launcher
+- `ab31962` fix(ibkr): parse version and reorganize install into /root/Jts/<version>/
+- `5d6cf8a` fix(ibkr): patch gatewaystart hardcode + clean Xvfb lock on restart
+- `f06934a` fix(ibkr): patch out ALL gatewaystart.sh hardcoded defaults
+- `3ed4831` fix(ibkr): change sed delimiter so | alternation parses correctly
+- `26f0b8e` fix(ibkr): TWS_PATH points to version dir directly so IBC finds vmoptions
+- `832b15e` feat(infra/ibkr): adopt gnzsnz/ib-gateway-docker recipe (Apache-2.0)
+- `f557de1` feat(ibkr): set EXISTING_SESSION_DETECTED_ACTION=primary
+- `baf8bbc` fix(ibkr): set TWS_ACCEPT_INCOMING=accept so API socket actually binds
+- `92802c9` debug(ibkr): temp VNC enabled to see blocking dialog
+- `c985ab0` debug(ibkr): use port 25901 for VNC (5901 already in use on NAS)
+- `fe5df3a` chore(ibkr): remove temp VNC debug exposure
+
+### F5 — Docs
+- `7641187` docs: rewrite root README to lead with broker tracker; preserve rnpksync separately
 
 ---
 
