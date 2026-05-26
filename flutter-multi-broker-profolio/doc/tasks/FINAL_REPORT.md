@@ -50,7 +50,7 @@ Latest validated full-suite gates (from `88d4604`):
 | broker-integration-binance | complete | b60ca13 |
 | transactions-history | complete | 55b82ea |
 | live-quote-streaming | complete | 88d4604 |
-| final-report | this slice | pending commit |
+| final-report | complete | (this commit) |
 
 ---
 
@@ -177,3 +177,39 @@ and sidecar automation. Range: `b9f9b8a..7641187`.
 1. Real broker credential smoke on a live account for each source (Binance, IBKR gateway-authenticated, Futu OpenD-authenticated).
 2. Capture and commit a screenshot of the dashboard with real data to `doc/screenshots/post-mvp-dashboard.png`.
 3. Optional release tag (for example: `v0.1-personal-mvp`).
+
+---
+
+## Post-MVP Completion
+
+**Written:** 2026-05-26 · **Orchestrator stopping condition met.**
+
+All 14 base modules and all 7 post-MVP slices are `[x]` or `[!]`.
+
+### What was built
+
+| Layer | Summary |
+|---|---|
+| Flutter client | Firebase Auth + PIN/biometric lock; Riverpod state; Drift local DB; E2E AES-GCM credential encryption; all broker Add Connection flows; Positions + Transactions + Dashboard screens with live quote binding |
+| Backend proxy | FastAPI + per-request adapter lifetime; LongBridge, Binance, IBKR, Futu adapters; Frankfurter FX; Firestore vault; background alert worker; authenticated WebSocket quote streaming |
+| Infra | docker-compose with self-built IBKR IB-Gateway (IBC headless) and Futu OpenD images; Firebase emulator; smoke-test documented |
+
+### Final gate numbers (commit `88d4604` — live-quote-streaming)
+
+| Gate | Result |
+|---|---|
+| Backend pytest | 257 passed, 8 skipped |
+| Backend coverage | 93.09% |
+| Backend lint | ruff clean |
+| Backend type-check | mypy --strict clean |
+| Flutter analyze | clean |
+| Flutter test | 250 passed |
+
+### Blocked (require human operator)
+
+| Slice | Reason |
+|---|---|
+| broker-integration-binance (smoke) | Real read-only Binance API key required |
+| broker-integration-ibkr (smoke) | IBKR account + IBC interactive auth required |
+| broker-integration-futu (smoke) | Futu OpenD login credentials required |
+| final-report (screenshot) | Live account data + interactive UI capture required |
