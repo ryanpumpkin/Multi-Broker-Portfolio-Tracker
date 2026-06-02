@@ -1,1 +1,1 @@
-2026-05-28T12:00:00Z · last_wave=5 · next_wave=done · in_progress= · blocked=broker-integration-binance-manual,broker-integration-ibkr-manual,broker-integration-futu-manual,final-report-screenshot · stopping_condition=met
+2026-06-02T00:00:00Z · last_wave=5 · next_wave=done · in_progress= · blocked=broker-integration-binance-manual,broker-integration-ibkr-manual,broker-integration-futu-manual,final-report-screenshot · stopping_condition=met
