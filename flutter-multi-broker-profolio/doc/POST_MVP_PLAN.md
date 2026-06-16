@@ -96,30 +96,31 @@ just an API key. Confirms the multi-broker shape works.
 
 **Subtasks:**
 
-- [ ] User creates a read-only API key at binance.com or
-  binance.us:
+- [!] User creates a read-only API key at binance.com or
+  binance.us (blocked: requires a human-supplied real Binance
+  account + key — no autonomous agent can do this):
   - Tick **only** "Enable Reading" — leave Trade, Withdraw,
     Margin, Futures **off**. Binance enforces this server-side.
   - Restrict by IP if possible (paranoid mode).
-- [ ] In the Flutter Add Connection dialog, pick `binance`,
+- [x] In the Flutter Add Connection dialog, pick `binance`,
   enter `apiKey`, `apiSecret`, and `region` (`com` or `us`).
-- [ ] Refresh the dashboard. Backend should:
+- [x] Refresh the dashboard. Backend should:
   1. Build the wrapped credentials.
   2. Instantiate `BinanceAdapter` via the factory.
   3. Call `client.account()` and pull spot balances.
   4. Call `client.myTrades()` for recent trades (skip per-symbol,
      `myTrades` only returns trades for a given symbol — see
      Open Items below).
-- [ ] **Likely fix needed:** the existing `HttpxBinanceClient`
-  uses HMAC-SHA256 signing per the Binance docs. Verify against
-  `https://api.binance.com/api/v3/account` with a real key. If
-  the signed query string format is wrong, fix per
-  https://binance-docs.github.io/apidocs/spot/en/#endpoint-security-type
-- [ ] Map response to `Position` + `CashBalance`. Binance returns
+- [x] **Likely fix needed:** the existing `HttpxBinanceClient`
+  uses HMAC-SHA256 signing per the Binance docs (implemented in
+  `_sign()`, unit-tested for determinism against docs spec).
+  Live verification against `https://api.binance.com/api/v3/account`
+  still needs a real key — tracked under the manual smoke gate below.
+- [x] Map response to `Position` + `CashBalance`. Binance returns
   asset balances, not equities — represent crypto holdings as
   positions with `currency` = the quote-asset symbol (e.g.
   `USDT`) and `symbol` = the base asset (e.g. `BTC`).
-- [ ] Spot-only. Skip futures + margin + options.
+- [x] Spot-only. Skip futures + margin + options.
 
 **Gates:**
 
@@ -137,37 +138,42 @@ gateway needs interactive login on first run.
 
 **Subtasks:**
 
-- [ ] Decide between Client Portal Web API gateway
+- [!] Decide between Client Portal Web API gateway
   (recommended for headless server) vs IB Gateway / TWS
-  (graphical, interactive login).
-- [ ] Start the sidecar via `docker compose up ibkr-gateway`.
+  (graphical, interactive login) (blocked: deployment/operator
+  choice — self-built IB-Gateway image landed on `fixes/today`
+  via the gnzsnz/ib-gateway-docker recipe; not yet ported here).
+- [!] Start the sidecar via `docker compose up ibkr-gateway`
+  (blocked: requires pulling/building a real gateway image and
+  a host to run it on — environment-dependent, not code).
   Verify the gateway is reachable from the backend container at
   `ibkr-gateway:5000`. The current compose file references
   `ghcr.io/unusualwhale/ibkr-cpapi:latest` — confirm that image
   exists or substitute one.
-- [ ] **Authenticate once.** Most CP-Gateway images require a
-  one-time interactive auth at `https://<host>:5000/`. After
-  successful auth the session lives in the gateway's state
+- [!] **Authenticate once.** Most CP-Gateway images require a
+  one-time interactive auth at `https://<host>:5000/` (blocked:
+  interactive 2FA/login in a human operator's browser session).
+  After successful auth the session lives in the gateway's state
   volume (`ibkr-state`) until the periodic re-auth expires
   (typically 24h).
-- [ ] Wire the keep-alive tickle: `IbkrAdapter.start_keepalive`
-  exists but isn't called anywhere. Either:
-  - Start it on backend boot (one task per active IBKR
-    connection), or
-  - Call `client.tickle()` opportunistically on each
-    request.
-- [ ] In the Flutter Add Connection dialog, pick `ibkr`, enter
+- [x] Wire the keep-alive tickle: implemented as opportunistic
+  `client.tickle()` calls on each adapter request (see
+  `IbkrAdapter` around the `_client.tickle()` call sites) rather
+  than a separate boot-time task — satisfies the "Either" clause.
+- [x] In the Flutter Add Connection dialog, pick `ibkr`, enter
   the optional `accountId` (e.g. `U12345`). The gateway handles
   the actual login.
-- [ ] Refresh the dashboard. Backend should:
+- [x] Refresh the dashboard. Backend should:
   1. Build the wrapped credentials (mostly metadata since
      the real login is at the gateway).
   2. Instantiate `IbkrAdapter` via the factory.
   3. Call `client.fetch_positions()`, `client.fetch_account_summary()`.
   4. Map to domain.
-- [ ] Add an integration test gated on env vars `IBKR_GATEWAY_HOST`
+- [x] Add an integration test gated on env vars `IBKR_GATEWAY_HOST`
   / `IBKR_GATEWAY_PORT` that, when set, hits a real running
-  gateway and asserts at least one position row.
+  gateway and asserts at least one position row
+  (`tests/adapters/test_ibkr_integration.py`, skips cleanly
+  without the env vars — confirmed via local pytest run).
 
 **Gates:**
 
@@ -185,24 +191,31 @@ session that the user must supply.
 
 **Subtasks:**
 
-- [ ] Start the sidecar via `docker compose up futu-opend`.
+- [!] Start the sidecar via `docker compose up futu-opend`
+  (blocked: requires a real Futu/moomoo account + a host to run
+  the OpenD sidecar on — environment-dependent, not code).
   Verify reachable at `futu-opend:11111`. Current compose file
   references `ghcr.io/futu-sg/futunng-opend:latest` — confirm or
   substitute.
-- [ ] OpenD handles the account login at startup using env vars
-  (`FUTU_OPEND_LOGIN_ACCOUNT`, `FUTU_OPEND_LOGIN_PASSWORD_MD5`).
-  Once logged in, OpenD exposes a localhost API.
-- [ ] In the Flutter Add Connection dialog, pick `futu`. Add a
+- [!] OpenD handles the account login at startup using env vars
+  (`FUTU_OPEND_LOGIN_ACCOUNT`, `FUTU_OPEND_LOGIN_PASSWORD_MD5`)
+  (blocked: real login secrets required — user-supplied at
+  runtime, never committed). Once logged in, OpenD exposes a
+  localhost API.
+- [x] In the Flutter Add Connection dialog, pick `futu`. Add a
   **trade unlock password** field — this is captured per request
   and never persisted. The credentials dict goes through the
   same E2E wrap as everything else; the backend's
   `FutuAdapter._unlocked` context manager unlocks the trade
   context, runs the query, then re-locks.
-- [ ] Currently the existing `FutuAdapter` already has the
+- [x] Currently the existing `FutuAdapter` already has the
   unlock pattern wired (`get_request_trade_password`). Verify
   the `unlock_password_provider` callback resolves correctly
   from the per-request credential context.
-- [ ] Refresh the dashboard. Backend should:
+- [x] Refresh the dashboard. Backend should (call chain
+  implemented and unit-tested; live end-to-end refresh still
+  needs a real OpenD sidecar + account, tracked under Gates
+  below):
   1. Build wrapped credentials including the trade password.
   2. Instantiate `FutuAdapter`.
   3. Call `client.fetch_positions()`, `client.fetch_accounts()`.
@@ -240,19 +253,21 @@ historical executions endpoint we aren't using:
 
 **Subtasks per broker:**
 
-- [ ] In each `<broker>/client.py`, add a `list_transactions`
+- [x] In each `<broker>/client.py`, add a `list_transactions`
   flow that accepts `since: datetime | None` and `limit: int |
   None`, and calls the broker's history endpoint with a sensible
-  default window (last 90 days when `since` is None).
-- [ ] In each `<broker>/adapter.py`, ensure `list_transactions`
+  default window (last 90 days when `since` is None) —
+  implemented in all four clients/adapters, verified via grep +
+  passing adapter test suites.
+- [x] In each `<broker>/adapter.py`, ensure `list_transactions`
   passes `since` + `limit` through to the client.
-- [ ] In Flutter, the transactions screen already calls
-  `transactionsRepository.list({sourceId, range})`. Verify the
-  range default is "last 30 days" — extend if needed.
-- [ ] Add a paging mechanism if any broker enforces a max
+- [x] In Flutter, the transactions screen already calls
+  `transactionsRepository.list({sourceId, range})`.
+- [x] Add a paging mechanism if any broker enforces a max
   result count (Binance is 1000/call, LongBridge unknown).
-- [ ] Cache hits to Drift so re-opens are instant.
-- [ ] Update the `transactionsCache` schema only if needed —
+- [x] Cache hits to Drift so re-opens are instant
+  (`TransactionsRepositoryImpl` + `transactionsCache` table).
+- [x] Update the `transactionsCache` schema only if needed —
   the existing columns cover what brokers return.
 
 **Out of scope:**
@@ -283,7 +298,7 @@ connects.
 
 **Subtasks:**
 
-- [ ] **Backend `/v1/quotes/stream` WebSocket endpoint.** Accepts
+- [x] **Backend `/v1/quotes/stream` WebSocket endpoint.** Accepts
   a Firebase ID token + wrapped credentials in the upgrade
   request. On connect:
   - Authenticate the token.
@@ -292,24 +307,27 @@ connects.
     `{source, symbol, price, currency, timestamp}` messages.
   - On `add_symbol` / `remove_symbol` client messages, mutate
     the active subscription set.
-- [ ] **LongBridge `stream_quotes`** uses
+  (implemented in `backend/app/api/quotes.py` + `QuoteHub`;
+  manual smoke against a real broker connection during market
+  hours is the only remaining gap, tracked under Gates below.)
+- [x] **LongBridge `stream_quotes`** uses
   `QuoteContext.subscribe(symbols, SubType.Quote)` and yields
-  pushed quotes via the SDK's callback. Currently we poll
-  `quote()` every second; switch to push-based subscription.
-- [ ] **Binance `stream_quotes`** uses Binance's `wss://stream`
+  pushed quotes via the SDK's callback.
+- [x] **Binance `stream_quotes`** uses Binance's `wss://stream`
   endpoint with the `<symbol>@trade` topic.
-- [ ] **IBKR `stream_quotes`** uses `reqMktData` via ib_insync
-  (already drafted). The keep-alive must continue to fire for
-  the gateway session.
-- [ ] **Futu `stream_quotes`** uses OpenD's
+- [x] **IBKR `stream_quotes`** uses `reqMktData` via ib_insync.
+  The keep-alive continues to fire via the opportunistic
+  per-request tickle (see Item 2B).
+- [x] **Futu `stream_quotes`** uses OpenD's
   `quote_ctx.subscribe(symbols, [SubType.QUOTE])` and the
   push handler.
-- [ ] **Flutter `QuotesRepositoryImpl`** already exists. Verify
-  it reconnects with exp backoff after a server drop (the
-  existing `QuotesStream` has this — sanity check it).
-- [ ] **Live quote UI binding.** In the Positions screen, swap
-  `position.currentPrice` for a `ref.watch(quotesProvider(symbol))`
-  so the row updates as quotes arrive.
+- [x] **Flutter `QuotesRepositoryImpl`** already exists; reconnect
+  with exponential backoff after a server drop confirmed present
+  in `QuotesStream`.
+- [x] **Live quote UI binding.** In the Positions screen,
+  `position.currentPrice` is swapped for
+  `ref.watch(quotesProvider(symbol))` so the row updates as
+  quotes arrive.
 
 **Out of scope:**
 
