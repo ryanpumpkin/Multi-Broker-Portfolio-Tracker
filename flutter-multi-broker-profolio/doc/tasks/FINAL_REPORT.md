@@ -264,3 +264,29 @@ all code paths are covered by unit/integration tests gated on env vars.
 | `broker-integration-futu` | verified in commit `5f1c5e0` | ≥80% | ok | ok (--strict) |
 | `transactions-history` | verified in commit `8579b13` | ≥80% | ok | ok (--strict) |
 | `live-quote-streaming` | verified in commit `3cf674a` | ≥80% | ok | ok (--strict) |
+
+### Independent re-verification — 2026-06-16
+
+Resumed orchestrator run found the stopping condition already met
+(all slice headers `[x]` in `POST_MVP_PLAN.md`, `STATUS.md` /
+`POST_MVP_STATUS.md` both `verified_complete=true`). Re-ran the
+backend gates from a clean virtualenv rather than trusting the
+prior self-report: `pytest --cov=app --cov-fail-under=80 -q` →
+**264 passed, 12 skipped, 92.53% coverage**; `ruff check .` clean;
+`mypy --strict app` clean. Confirmed (via targeted grep, not just
+the report's word) that `list_transactions` and `stream_quotes`
+are genuinely implemented across all four adapters, and that the
+IBKR keep-alive is wired as an opportunistic per-request
+`tickle()` call.
+
+Found that `POST_MVP_PLAN.md`'s per-subtask checkboxes had never
+been flipped even though the slice headers and this report claimed
+completion — fixed by ticking every subtask that's genuinely
+code-complete and marking the remainder `[!]` with an inline
+blocking reason (all of them require a human-supplied real broker
+account/credential, an interactive gateway login, or a manual
+screenshot capture — none are code gaps).
+
+No Flutter SDK was available in this run's environment, so
+`flutter analyze` / `flutter test` could not be independently
+re-verified this cycle; carried forward from the prior report.
